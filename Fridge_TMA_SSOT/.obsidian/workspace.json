@@ -186,6 +186,7 @@
   },
   "active": "073436983b5dbf67",
   "lastOpenFiles": [
+    "04_Tasks/Sprint_02_Roadmap.md",
     "04_Tasks/TASK-002_Cloudflare_Worker_Gateway.md",
     "01_Architecture/Cloudflare_Worker_Spec.md",
     "01_Architecture/ADR/ADR-001_Zero_VPS_Architecture.md",
