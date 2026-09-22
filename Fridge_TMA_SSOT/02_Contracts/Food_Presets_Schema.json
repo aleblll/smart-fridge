@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://holodilnik.tma/schemas/food-presets.json",
+  "title": "SanPiN & USDA Food Presets Dataset Schema",
+  "description": "Схема валидации элементов локального справочника сроков хранения продуктов (src/data/foodPresets.json)",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "id",
+      "name",
+      "category",
+      "synonyms",
+      "shelf_life_days",
+      "after_opening_hours",
+      "risk_level",
+      "default_unit",
+      "notify_before_days"
+    ],
+    "properties": {
+      "id": {
+        "type": "string",
+        "pattern": "^[a-z0-9_-]+$",
+        "description": "Уникальный идентификатор пресета в kebab-case"
+      },
+      "name": {
+        "type": "string",
+        "minLength": 2,
+        "maxLength": 64,
+        "description": "Каноническое название продукта на русском языке"
+      },
+      "category": {
+        "type": "string",
+        "enum": [
+          "Молочная продукция",
+          "Сыры",
+          "Мясо и птица",
+          "Рыба и морепродукты",
+          "Овощи и зелень",
+          "Фрукты и ягоды",
+          "Готовая кулинария",
+          "Полуфабрикаты",
+          "Бакалея и консервы",
+          "Напитки",
+          "Соусы и приправы"
+        ]
+      },
+      "synonyms": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Список ключевых слов и синонимов для нечеткого поиска"
+      },
+      "shelf_life_days": {
+        "type": "object",
+        "required": ["fridge"],
+        "properties": {
+          "fridge": {
+            "type": ["number", "null"],
+            "description": "Срок хранения в холодильнике (+2..+4 °C) в днях"
+          },
+          "freezer": {
+            "type": ["number", "null"],
+            "description": "Срок хранения в морозильной камере (-18 °C) в днях"
+          },
+          "pantry": {
+            "type": ["number", "null"],
+            "description": "Срок хранения при комнатной температуре (+18..+22 °C) в днях"
+          }
+        },
+        "additionalProperties": false
+      },
+      "after_opening_hours": {
+        "type": ["number", "null"],
+        "description": "Вторичный срок хранения после вскрытия упаковки в часах"
+      },
+      "risk_level": {
+        "type": "string",
+        "enum": ["extreme", "high", "medium", "low"],
+        "description": "Уровень микробиологического риска по классификации СанПиН/МУК"
+      },
+      "sanpin_ref": {
+        "type": ["string", "null"],
+        "description": "Пункт или таблица СанПиН 2.3.2.1324-03 / USDA FoodKeeper"
+      },
+      "storage_tips": {
+        "type": ["string", "null"],
+        "description": "Правила товарного соседства, этиленовой изоляции или зоны размещения"
+      },
+      "default_unit": {
+        "type": "string",
+        "enum": ["pcs", "kg", "g", "l", "pack"],
+        "description": "Единица измерения по умолчанию"
+      },
+      "notify_before_days": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 7,
+        "description": "Рекомендуемый интервал упреждающего оповещения в днях"
+      }
+    },
+    "additionalProperties": false
+  }
+}

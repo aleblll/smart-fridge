@@ -1,0 +1,34 @@
+name: Daily Morning Fridge Digest Notifier
+
+on:
+  schedule:
+    # 06:00 UTC = 09:00 MSK daily
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: daily-notify-cron
+  cancel-in-progress: true
+
+jobs:
+  notify:
+    name: Run Morning Digest Notifier
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Execute Notification Script
+        env:
+          CLOUDFLARE_WORKER_URL: ${{ secrets.CLOUDFLARE_WORKER_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_APP_URL: ${{ secrets.TELEGRAM_APP_URL }}
+        run: node scripts/notify.mjs

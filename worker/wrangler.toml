@@ -1,0 +1,13 @@
+name = "smart-fridge-edge-gateway"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+ENVIRONMENT = "production"
+# Secrets such as TELEGRAM_BOT_TOKEN are set via `wrangler secret put TELEGRAM_BOT_TOKEN`
+
+[[kv_namespaces]]
+binding = "FRIDGE_KV"
+id = "fridge_kv_namespace"
+preview_id = "fridge_kv_preview"

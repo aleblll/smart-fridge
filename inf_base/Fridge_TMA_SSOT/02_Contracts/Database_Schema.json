@@ -1,0 +1,192 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://holodilnik.tma/schemas/database.json",
+  "title": "Firebase RTDB Master Database Schema",
+  "description": "Каноническая иерархия данных Firebase Realtime Database для Telegram Mini App «Умный холодильник»",
+  "type": "object",
+  "required": ["users", "fridges", "invites"],
+  "properties": {
+    "users": {
+      "type": "object",
+      "description": "Реестр профилей пользователей по telegram_id",
+      "patternProperties": {
+        "^[0-9]+$": {
+          "type": "object",
+          "required": ["first_name", "created_at"],
+          "properties": {
+            "first_name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "username": {
+              "type": ["string", "null"],
+              "maxLength": 64
+            },
+            "timezone": {
+              "type": "string",
+              "default": "Europe/Moscow",
+              "examples": ["Europe/Moscow", "Asia/Yekaterinburg", "UTC"]
+            },
+            "active_fridge_id": {
+              "type": ["string", "null"]
+            },
+            "created_at": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "fridges": {
+      "type": "object",
+      "description": "Изолированные пространства холодильников",
+      "patternProperties": {
+        "^[a-zA-Z0-9_-]+$": {
+          "type": "object",
+          "required": ["name", "owner_id", "members", "created_at"],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "examples": ["Дом", "Дача", "Семья"]
+            },
+            "owner_id": {
+              "type": "integer",
+              "description": "Telegram ID создателя и главного администратора"
+            },
+            "created_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "members": {
+              "type": "object",
+              "description": "Матрица участников { [telegram_id]: role }",
+              "patternProperties": {
+                "^[0-9]+$": {
+                  "type": "string",
+                  "enum": ["owner", "editor", "viewer"]
+                }
+              }
+            },
+            "products": {
+              "type": "object",
+              "description": "Инвентарь продуктов в данном холодильнике",
+              "patternProperties": {
+                "^[a-zA-Z0-9_-]+$": {
+                  "type": "object",
+                  "required": [
+                    "name",
+                    "storage_type",
+                    "quantity",
+                    "unit",
+                    "expires_at",
+                    "status",
+                    "added_by",
+                    "created_at"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "category": {
+                      "type": "string",
+                      "examples": ["Молочная продукция", "Мясо и птица", "Овощи и зелень"]
+                    },
+                    "storage_type": {
+                      "type": "string",
+                      "enum": ["fridge", "freezer", "pantry"]
+                    },
+                    "quantity": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "unit": {
+                      "type": "string",
+                      "enum": ["pcs", "kg", "g", "l", "pack"]
+                    },
+                    "opened_at": {
+                      "type": ["string", "null"],
+                      "format": "date-time"
+                    },
+                    "expires_at": {
+                      "type": "string",
+                      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+                    },
+                    "notify_before_days": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 14,
+                      "default": 2
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": ["active", "consumed", "discarded"],
+                      "default": "active"
+                    },
+                    "added_by": {
+                      "type": "integer",
+                      "description": "Telegram ID добавившего участника"
+                    },
+                    "created_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updated_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "invites": {
+      "type": "object",
+      "description": "Токены инвайтов для совместного доступа",
+      "patternProperties": {
+        "^[a-zA-Z0-9_-]+$": {
+          "type": "object",
+          "required": [
+            "fridge_id",
+            "created_by",
+            "expires_at",
+            "max_uses",
+            "uses_count"
+          ],
+          "properties": {
+            "fridge_id": {
+              "type": "string"
+            },
+            "created_by": {
+              "type": "integer"
+            },
+            "expires_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "max_uses": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "uses_count": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    }
+  }
+}

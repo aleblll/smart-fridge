@@ -1,0 +1,62 @@
+@import "tailwindcss";
+
+@theme {
+  --color-surface-ground: var(--surface-ground);
+  --color-surface-card: var(--surface-card);
+  --color-surface-subtle: var(--surface-subtle);
+  --color-text-primary: var(--text-primary);
+  --color-text-muted: var(--text-muted);
+  --color-border-subtle: var(--border-subtle);
+  --color-border-strong: var(--border-strong);
+  --color-tg-button: var(--tg-button);
+  --color-tg-button-text: var(--tg-button-text);
+}
+
+:root {
+  /* Системные переменные Telegram WebApp с безопасными fallback-значениями */
+  --tg-bg: var(--tg-theme-bg-color, #09090b);
+  --tg-secondary-bg: var(--tg-theme-secondary-bg-color, #121215);
+  --tg-section-bg: var(--tg-theme-section-bg-color, #18181b);
+  --tg-text: var(--tg-theme-text-color, #f4f4f5);
+  --tg-hint: var(--tg-theme-hint-color, #71717a);
+  --tg-button: var(--tg-theme-button-color, #fafafa);
+  --tg-button-text: var(--tg-theme-button-text-color, #09090b);
+
+  /* Семантические токены поверхностей */
+  --surface-ground: var(--tg-bg);
+  --surface-card: var(--tg-secondary-bg);
+  --surface-subtle: var(--tg-section-bg);
+  
+  /* Токены текста */
+  --text-primary: var(--tg-text);
+  --text-muted: var(--tg-hint);
+  
+  /* Токены границ (Hairline micro-borders) */
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.16);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --tg-bg: var(--tg-theme-bg-color, #ffffff);
+    --tg-secondary-bg: var(--tg-theme-secondary-bg-color, #f4f4f5);
+    --tg-section-bg: var(--tg-theme-section-bg-color, #e4e4e7);
+    --tg-text: var(--tg-theme-text-color, #09090b);
+    --tg-hint: var(--tg-theme-hint-color, #71717a);
+    --tg-button: var(--tg-theme-button-color, #18181b);
+    --tg-button-text: var(--tg-theme-button-text-color, #ffffff);
+
+    --border-subtle: rgba(0, 0, 0, 0.06);
+    --border-strong: rgba(0, 0, 0, 0.12);
+  }
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Inter", sans-serif;
+  background-color: var(--surface-ground);
+  color: var(--text-primary);
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow-x: hidden;
+  -webkit-tap-highlight-color: transparent;
+}

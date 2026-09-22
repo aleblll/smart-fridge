@@ -1,0 +1,17 @@
+{
+  "name": "smart-fridge-worker",
+  "version": "1.0.0",
+  "description": "Cloudflare Worker Edge Gateway and DTO Sanitizer for Smart Fridge TMA",
+  "main": "cloudflare-worker.js",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240923.0",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.0",
+    "wrangler": "^3.100.0"
+  }
+}
