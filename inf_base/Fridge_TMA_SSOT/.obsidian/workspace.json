@@ -186,6 +186,9 @@
   },
   "active": "073436983b5dbf67",
   "lastOpenFiles": [
+    "04_Tasks/TASK-007_Automated_Post_Build_QA_Gate.md",
+    "04_Tasks/TASK-006_Inspo_MCP_Premium_UI_Redesign.md",
+    "01_Architecture/ADR/ADR-006_Agent_Orchestration_Inspo_MCP_and_Post_Build_QA.md",
     "04_Tasks/Sprint_02_Roadmap.md",
     "04_Tasks/TASK-002_Cloudflare_Worker_Gateway.md",
     "01_Architecture/Cloudflare_Worker_Spec.md",
