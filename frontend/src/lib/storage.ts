@@ -11,17 +11,20 @@ export const storage = {
     if (typeof window !== 'undefined' && window.Telegram?.WebApp?.CloudStorage) {
       try {
         const cs = window.Telegram.WebApp.CloudStorage;
-        const cloudData = await new Promise<string | null>((resolve) => {
-          cs.getItem(STORAGE_KEY, (err: Error | null, val?: string) => {
-            if (!err && val) {
-              logger.sync(`CloudStorage read successful: ${val.length} bytes`);
-              resolve(val);
-            } else {
-              if (err) logger.warn('STORAGE', `CloudStorage read error: ${err.message}`);
-              resolve(null);
-            }
-          });
-        });
+        const cloudData = await Promise.race([
+          new Promise<string | null>((resolve) => {
+            cs.getItem(STORAGE_KEY, (err: Error | null, val?: string) => {
+              if (!err && val) {
+                logger.sync(`CloudStorage read successful: ${val.length} bytes`);
+                resolve(val);
+              } else {
+                if (err) logger.warn('STORAGE', `CloudStorage read error: ${err.message}`);
+                resolve(null);
+              }
+            });
+          }),
+          new Promise<string | null>((resolve) => setTimeout(() => resolve(null), 1500)),
+        ]);
 
         if (cloudData) {
           const parsed = JSON.parse(cloudData);

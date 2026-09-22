@@ -35,6 +35,13 @@ const QUICK_DAYS = [
   { days: 30, label: '+1 мес' },
 ];
 
+function formatDateYMD(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
   open,
   onOpenChange,
@@ -49,7 +56,7 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
   const [expiresAt, setExpiresAt] = useState<string>(() => {
     const d = new Date();
     d.setDate(d.getDate() + 5);
-    return d.toISOString().slice(0, 10);
+    return formatDateYMD(d);
   });
 
   const inputRef = useRef<HTMLInputElement>(null);
@@ -63,7 +70,7 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
     setDaysOffset(days);
     const d = new Date();
     d.setDate(d.getDate() + days);
-    setExpiresAt(d.toISOString().slice(0, 10));
+    setExpiresAt(formatDateYMD(d));
   };
 
   // Adjust exact date by delta days
@@ -71,7 +78,7 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
     haptic.impact('light');
     const current = new Date(expiresAt || Date.now());
     current.setDate(current.getDate() + delta);
-    const newStr = current.toISOString().slice(0, 10);
+    const newStr = formatDateYMD(current);
     setExpiresAt(newStr);
 
     const diffDays = Math.round((current.getTime() - Date.now()) / 86400000);
