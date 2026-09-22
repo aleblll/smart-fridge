@@ -4,9 +4,11 @@ import { useTelegramWebApp } from '@/hooks/useTelegramWebApp';
 import { AddProductDrawer } from '@/components/AddProductDrawer';
 import { ProductCard } from '@/components/ProductCard';
 import { ShareModal } from '@/components/ShareModal';
+import { DiagnosticsDrawer } from '@/components/DiagnosticsDrawer';
 import { storage } from '@/lib/storage';
+import { logger } from '@/lib/logger';
 import type { ProductItem, StorageType, ProductStatus } from '@/types';
-import { Plus, Users, Search, Sparkles, Utensils, Trash2, Refrigerator } from 'lucide-react';
+import { Plus, Users, Search, Sparkles, Utensils, Trash2, Refrigerator, Terminal, Snowflake, Archive } from 'lucide-react';
 
 const CATEGORIES = [
   'Все',
@@ -74,6 +76,7 @@ function MainScreen() {
   const { user, haptic } = useTelegramWebApp();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [diagOpen, setDiagOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'inventory' | 'consumed' | 'discarded'>('inventory');
   const [activeZone, setActiveZone] = useState<StorageType | 'all'>('all');
   const [selectedCategory, setSelectedCategory] = useState<string>('Все');
@@ -118,6 +121,7 @@ function MainScreen() {
         p.id === id ? { ...p, status: newStatus, updated_at: new Date().toISOString() } : p
       )
     );
+    logger.info('INVENTORY', `Item ${id} status changed to ${newStatus}`);
   };
 
   // Count items
@@ -149,22 +153,18 @@ function MainScreen() {
   const displayedProducts = useMemo(() => {
     return products
       .filter((p) => {
-        // Tab filter
         if (activeTab === 'inventory' && p.status !== 'active') return false;
         if (activeTab === 'consumed' && p.status !== 'consumed') return false;
         if (activeTab === 'discarded' && p.status !== 'discarded') return false;
 
-        // Zone filter (only in inventory)
         if (activeTab === 'inventory' && activeZone !== 'all' && p.storage_type !== activeZone) {
           return false;
         }
 
-        // Category filter
         if (selectedCategory !== 'Все' && p.category !== selectedCategory) {
           return false;
         }
 
-        // Search filter
         if (searchQuery.trim()) {
           const q = searchQuery.toLowerCase();
           return p.name.toLowerCase().includes(q) || p.category.toLowerCase().includes(q);
@@ -174,52 +174,64 @@ function MainScreen() {
       })
       .sort((a, b) => {
         if (activeTab === 'inventory') {
-          // Sort by expiration date ascending (expiring first)
           return new Date(a.expires_at).getTime() - new Date(b.expires_at).getTime();
         }
-        // Otherwise by updated_at descending
         return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
       });
   }, [products, activeTab, activeZone, selectedCategory, searchQuery]);
 
   return (
-    <div className="min-h-screen bg-[var(--surface-ground)] text-[var(--text-primary)] px-4 py-4 max-w-md mx-auto space-y-4 pb-28">
+    <div className="min-h-screen bg-[#0e1013] text-slate-100 px-4 py-4 max-w-md mx-auto space-y-4 pb-28">
       {/* Top Header */}
       <header className="flex items-center justify-between pt-1">
         <div>
-          <h1 className="text-xl font-bold tracking-tight flex items-center gap-2">
+          <h1 className="text-xl font-bold tracking-tight flex items-center gap-2 text-white">
             <span>Свежесть</span>
-            <span className="text-xs font-normal px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-400 font-mono">
+            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-sky-500/20 text-sky-400 font-mono">
               {counts.active} шт.
             </span>
           </h1>
-          <p className="text-xs text-[var(--text-muted)] mt-0.5">
+          <p className="text-xs text-zinc-400 mt-0.5">
             {counts.expiringSoon > 0 ? (
-              <span className="text-amber-400 font-medium">
+              <span className="text-amber-400 font-semibold">
                 ⚠️ {counts.expiringSoon} требуют внимания
               </span>
             ) : (
-              <span>Все продукты свежие</span>
+              <span>Все продукты в норме</span>
             )}
           </p>
         </div>
 
-        {/* Share Button */}
-        <button
-          type="button"
-          onClick={() => {
-            haptic.impact('light');
-            setShareModalOpen(true);
-          }}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[var(--surface-subtle)] border border-[var(--border-subtle)] text-xs text-sky-400 font-medium hover:border-sky-500/40 active:scale-95 transition-all"
-        >
-          <Users className="w-3.5 h-3.5" />
-          <span>Семья</span>
-        </button>
+        {/* Header Actions: Share & Diagnostics */}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              haptic.impact('light');
+              setDiagOpen(true);
+            }}
+            className="p-2 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-sky-400 active:scale-95 transition-all"
+            title="Логи и диагностика"
+          >
+            <Terminal className="w-4 h-4" />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              haptic.impact('light');
+              setShareModalOpen(true);
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky-500/15 border border-sky-500/30 text-xs text-sky-400 font-semibold hover:bg-sky-500/25 active:scale-95 transition-all"
+          >
+            <Users className="w-3.5 h-3.5" />
+            <span>Семья</span>
+          </button>
+        </div>
       </header>
 
       {/* Main Tabs (Холодильник / Съедено / Мусорка) */}
-      <nav className="flex rounded-2xl bg-[var(--surface-card)] border border-[var(--border-subtle)] p-1">
+      <nav className="flex rounded-2xl bg-zinc-900 border border-zinc-800 p-1">
         <button
           type="button"
           onClick={() => {
@@ -228,8 +240,8 @@ function MainScreen() {
           }}
           className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-semibold rounded-xl transition-all ${
             activeTab === 'inventory'
-              ? 'bg-sky-500 text-slate-950 shadow-xs'
-              : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+              ? 'bg-sky-500 text-slate-950 font-bold shadow-xs'
+              : 'text-zinc-400 hover:text-white'
           }`}
         >
           <Refrigerator className="w-3.5 h-3.5" />
@@ -244,8 +256,8 @@ function MainScreen() {
           }}
           className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-semibold rounded-xl transition-all ${
             activeTab === 'consumed'
-              ? 'bg-emerald-500 text-slate-950 shadow-xs'
-              : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+              ? 'bg-emerald-500 text-slate-950 font-bold shadow-xs'
+              : 'text-zinc-400 hover:text-white'
           }`}
         >
           <Utensils className="w-3.5 h-3.5" />
@@ -260,8 +272,8 @@ function MainScreen() {
           }}
           className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-semibold rounded-xl transition-all ${
             activeTab === 'discarded'
-              ? 'bg-rose-500 text-slate-950 shadow-xs'
-              : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+              ? 'bg-rose-500 text-slate-950 font-bold shadow-xs'
+              : 'text-zinc-400 hover:text-white'
           }`}
         >
           <Trash2 className="w-3.5 h-3.5" />
@@ -271,14 +283,13 @@ function MainScreen() {
 
       {/* Zone Filter (Only in Inventory tab) */}
       {activeTab === 'inventory' && (
-        <section className="flex rounded-xl bg-[var(--surface-subtle)] p-1 text-xs">
-          {(['all', 'fridge', 'freezer', 'pantry'] as const).map((zone) => {
-            const labels: Record<typeof zone, string> = {
-              all: 'Все зоны',
-              fridge: 'Холод',
-              freezer: 'Морозилка',
-              pantry: 'Шкаф',
-            };
+        <section className="grid grid-cols-4 gap-1.5 text-xs">
+          {[
+            { zone: 'all' as const, label: 'Все зоны', icon: Sparkles },
+            { zone: 'fridge' as const, label: 'Холод', icon: Refrigerator },
+            { zone: 'freezer' as const, label: 'Мороз', icon: Snowflake },
+            { zone: 'pantry' as const, label: 'Шкаф', icon: Archive },
+          ].map(({ zone, label, icon: Icon }) => {
             const isSelected = activeZone === zone;
             return (
               <button
@@ -288,13 +299,14 @@ function MainScreen() {
                   haptic.impact('light');
                   setActiveZone(zone);
                 }}
-                className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                className={`flex items-center justify-center gap-1 py-2 rounded-xl text-xs font-medium border transition-all ${
                   isSelected
-                    ? 'bg-[var(--surface-card)] text-[var(--text-primary)] font-semibold shadow-xs'
-                    : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                    ? 'bg-zinc-800 border-zinc-700 text-sky-400 font-bold shadow-xs'
+                    : 'bg-zinc-900/60 border-zinc-800/80 text-zinc-400 hover:text-white'
                 }`}
               >
-                {labels[zone]}
+                <Icon className="w-3 h-3" />
+                <span>{label}</span>
               </button>
             );
           })}
@@ -315,8 +327,8 @@ function MainScreen() {
               }}
               className={`px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap border transition-all ${
                 isSelected
-                  ? 'bg-[var(--surface-card)] border-sky-500 text-sky-400 font-semibold'
-                  : 'bg-[var(--surface-subtle)] border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                  ? 'bg-sky-500/20 border-sky-500 text-sky-300 font-bold'
+                  : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-white'
               }`}
             >
               {cat}
@@ -327,26 +339,26 @@ function MainScreen() {
 
       {/* Search Bar */}
       <div className="relative">
-        <Search className="w-4 h-4 absolute left-3.5 top-3 text-[var(--text-muted)]" />
+        <Search className="w-4 h-4 absolute left-3.5 top-3 text-zinc-400" />
         <input
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Поиск по продуктам..."
-          className="w-full pl-9 pr-4 py-2 rounded-xl bg-[var(--surface-card)] border border-[var(--border-subtle)] text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-sky-500/50"
+          placeholder="Поиск по добавленным продуктам..."
+          className="w-full pl-9 pr-4 py-2.5 rounded-2xl bg-zinc-900 border border-zinc-800 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-sky-500/60"
         />
       </div>
 
       {/* Product List */}
       <section className="space-y-2 pt-1">
         {displayedProducts.length === 0 ? (
-          <div className="py-12 px-6 rounded-3xl bg-[var(--surface-card)] border border-[var(--border-subtle)] text-center space-y-3">
-            <Sparkles className="w-8 h-8 text-sky-400/60 mx-auto" />
+          <div className="py-12 px-6 rounded-3xl bg-zinc-900/70 border border-zinc-800 text-center space-y-3">
+            <Sparkles className="w-8 h-8 text-sky-400/70 mx-auto" />
             <div className="space-y-1">
-              <p className="text-sm font-semibold text-[var(--text-primary)]">
+              <p className="text-sm font-bold text-white">
                 {activeTab === 'inventory' ? 'Холодильник пуст' : 'В этом разделе пока пусто'}
               </p>
-              <p className="text-xs text-[var(--text-muted)]">
+              <p className="text-xs text-zinc-400">
                 {activeTab === 'inventory'
                   ? 'Нажмите кнопку внизу, чтобы быстро добавить продукты'
                   : 'Здесь будут сохраняться съеденные или списанные позиции'}
@@ -375,9 +387,9 @@ function MainScreen() {
               haptic.impact('medium');
               setDrawerOpen(true);
             }}
-            className="pointer-events-auto w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-sm shadow-lg shadow-sky-950/40 active:scale-[0.985] transition-all"
+            className="pointer-events-auto w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-sm shadow-xl shadow-sky-950/60 active:scale-[0.985] transition-all"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-4 h-4 stroke-[3]" />
             <span>Добавить продукт</span>
           </button>
         </div>
@@ -395,6 +407,12 @@ function MainScreen() {
         open={shareModalOpen}
         onClose={() => setShareModalOpen(false)}
         userId={user?.id}
+      />
+
+      {/* Diagnostics / Logs Drawer */}
+      <DiagnosticsDrawer
+        open={diagOpen}
+        onOpenChange={setDiagOpen}
       />
     </div>
   );
