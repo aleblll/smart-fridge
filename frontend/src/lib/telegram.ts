@@ -43,6 +43,15 @@ declare global {
         enableVerticalSwipes?: () => void;
         onEvent?: (eventType: string, eventHandler: () => void) => void;
         offEvent?: (eventType: string, eventHandler: () => void) => void;
+        openTelegramLink?: (url: string) => void;
+        CloudStorage?: {
+          setItem: (key: string, value: string, callback?: (error: Error | null, result?: boolean) => void) => void;
+          getItem: (key: string, callback: (error: Error | null, result?: string) => void) => void;
+          getItems: (keys: string[], callback: (error: Error | null, result?: Record<string, string>) => void) => void;
+          removeItem: (key: string, callback?: (error: Error | null, result?: boolean) => void) => void;
+          removeItems: (keys: string[], callback?: (error: Error | null, result?: boolean) => void) => void;
+          getKeys: (callback: (error: Error | null, result?: string[]) => void) => void;
+        };
         HapticFeedback?: {
           impactOccurred: (style: 'light' | 'medium' | 'heavy' | 'rigid' | 'soft') => void;
           notificationOccurred: (type: 'error' | 'success' | 'warning') => void;

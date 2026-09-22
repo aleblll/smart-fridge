@@ -4,7 +4,7 @@ import { haptic } from '@/lib/haptics';
 import { searchPresets, calculateExpirationDate, getRecommendedStorage } from '@/lib/presets';
 import type { FoodPreset } from '@/types/presets';
 import type { ProductItem, StorageType, UnitType } from '@/types';
-import { Plus, Minus, Check, Refrigerator, Snowflake, Archive, Sparkles } from 'lucide-react';
+import { Plus, Minus, Check, Refrigerator, Snowflake, Archive, Search } from 'lucide-react';
 
 interface AddProductDrawerProps {
   open: boolean;
@@ -13,8 +13,8 @@ interface AddProductDrawerProps {
 }
 
 const STORAGE_OPTIONS: { type: StorageType; label: string; icon: React.FC<{ className?: string }> }[] = [
-  { type: 'fridge', label: 'Холод', icon: Refrigerator },
-  { type: 'freezer', label: 'Мороз', icon: Snowflake },
+  { type: 'fridge', label: 'Холодильник', icon: Refrigerator },
+  { type: 'freezer', label: 'Морозилка', icon: Snowflake },
   { type: 'pantry', label: 'Шкаф', icon: Archive },
 ];
 
@@ -26,13 +26,24 @@ const UNIT_OPTIONS: { unit: UnitType; label: string }[] = [
   { unit: 'pack', label: 'уп' },
 ];
 
+const QUICK_CATEGORIES = [
+  'Все',
+  'Молочная продукция',
+  'Сыры',
+  'Мясо и птица',
+  'Овощи и зелень',
+  'Фрукты и ягоды',
+  'Рыба и морепродукты',
+  'Бакалея и консервы',
+];
+
 export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
   open,
   onOpenChange,
   onAddProduct,
 }) => {
   const [name, setName] = useState('');
-  const [category, setCategory] = useState('Другое');
+  const [selectedCat, setSelectedCat] = useState('Все');
   const [storageType, setStorageType] = useState<StorageType>('fridge');
   const [quantity, setQuantity] = useState(1);
   const [unit, setUnit] = useState<UnitType>('pcs');
@@ -45,8 +56,11 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
 
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Filter presets based on current input name
-  const filteredPresets = searchPresets(name, 8);
+  // Filter presets based on current query and category
+  const filteredPresets = searchPresets(name, 10).filter((p) => {
+    if (selectedCat === 'Все') return true;
+    return p.category === selectedCat;
+  });
 
   // Auto-focus input on drawer open
   useEffect(() => {
@@ -56,9 +70,8 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
       }, 150);
       return () => clearTimeout(timer);
     } else {
-      // Reset form on close
       setName('');
-      setCategory('Другое');
+      setSelectedCat('Все');
       setStorageType('fridge');
       setQuantity(1);
       setUnit('pcs');
@@ -87,25 +100,21 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
     onOpenChange(false);
   };
 
-  // Quantity stepper
   const handleQuantityChange = (delta: number) => {
     haptic.impact('light');
     setQuantity((prev) => Math.max(1, prev + delta));
   };
 
-  // Storage tab switch
   const handleStorageChange = (type: StorageType) => {
     haptic.impact('light');
     setStorageType(type);
   };
 
-  // Unit switch
   const handleUnitChange = (newUnit: UnitType) => {
     haptic.selection();
     setUnit(newUnit);
   };
 
-  // Manual submit
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
@@ -117,7 +126,7 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
 
     onAddProduct({
       name: name.trim(),
-      category,
+      category: selectedCat === 'Все' ? 'Другое' : selectedCat,
       storage_type: storageType,
       quantity,
       unit,
@@ -133,54 +142,75 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
   return (
     <Drawer.Root open={open} onOpenChange={onOpenChange}>
       <Drawer.Portal>
-        <Drawer.Overlay className="fixed inset-0 bg-black/60 backdrop-blur-[2px] z-40 transition-opacity" />
-        <Drawer.Content className="fixed bottom-0 left-0 right-0 max-w-lg mx-auto bg-[var(--surface-card)] border-t border-[var(--border-strong)] rounded-t-2xl z-50 p-4 pb-8 space-y-4 outline-none focus:outline-none max-h-[90vh] overflow-y-auto">
-          {/* Drawer Drag Handle */}
-          <div className="flex justify-center pb-1">
-            <div className="w-10 h-1 rounded-full bg-zinc-600/50" />
+        <Drawer.Overlay className="fixed inset-0 bg-black/70 backdrop-blur-xs z-40 transition-opacity" />
+        <Drawer.Content className="fixed bottom-0 left-0 right-0 max-w-lg mx-auto bg-[var(--surface-card)] border-t border-[var(--border-strong)] rounded-t-3xl z-50 p-5 pb-8 space-y-4 outline-none max-h-[90vh] overflow-y-auto">
+          {/* Drawer Handle */}
+          <div className="flex justify-center pb-0.5">
+            <div className="w-12 h-1.5 rounded-full bg-zinc-600/40" />
           </div>
 
           <div className="flex items-center justify-between">
-            <Drawer.Title className="text-base font-bold tracking-tight text-[var(--text-primary)]">
+            <Drawer.Title className="text-lg font-bold tracking-tight text-[var(--text-primary)]">
               Добавить продукт
             </Drawer.Title>
-            <span className="text-xs font-mono text-[var(--text-muted)]">СанПиН справочник</span>
+            <span className="text-xs text-[var(--text-muted)]">120+ готовых подсказок</span>
+          </div>
+
+          {/* Quick Categories Filter */}
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1">
+            {QUICK_CATEGORIES.map((cat) => {
+              const isSelected = selectedCat === cat;
+              return (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => {
+                    haptic.selection();
+                    setSelectedCat(cat);
+                  }}
+                  className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-all ${
+                    isSelected
+                      ? 'bg-sky-500 text-slate-950 font-semibold'
+                      : 'bg-[var(--surface-subtle)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                  }`}
+                >
+                  {cat}
+                </button>
+              );
+            })}
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Name Input with Auto-Focus */}
-            <div className="space-y-1.5">
-              <label htmlFor="product-name" className="text-xs font-medium text-[var(--text-muted)]">
-                Наименование
-              </label>
+            {/* Input with Search Icon */}
+            <div className="relative">
+              <Search className="w-4 h-4 absolute left-3.5 top-3.5 text-[var(--text-muted)]" />
               <input
                 id="product-name"
                 ref={inputRef}
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Например: Творог 9% или Молоко"
-                className="w-full px-3.5 py-2.5 rounded-lg bg-[var(--surface-subtle)] border border-[var(--border-subtle)] text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--border-strong)]"
+                placeholder="Поиск или свое название (молоко, сыр...)"
+                className="w-full pl-10 pr-4 py-3 rounded-xl bg-[var(--surface-subtle)] border border-[var(--border-subtle)] text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-sky-500/50"
                 autoComplete="off"
               />
             </div>
 
-            {/* Predictive Chips (Instant 1-tap add) */}
+            {/* Quick 1-tap Presets Chips */}
             <div className="space-y-1.5">
-              <div className="flex items-center gap-1 text-[11px] text-[var(--text-muted)]">
-                <Sparkles className="w-3 h-3 text-amber-400" />
-                <span>Быстрый выбор (1 тап для добавления):</span>
-              </div>
-              <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto pr-1">
+              <span className="text-[11px] font-medium text-[var(--text-muted)]">
+                {name.length >= 2 ? 'Найденные подсказки (нажмите для добавления):' : 'Популярные продукты:'}
+              </span>
+              <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto pr-1">
                 {filteredPresets.map((preset) => (
                   <button
                     key={preset.id}
                     type="button"
                     onClick={() => handleSelectPreset(preset)}
-                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-[var(--surface-subtle)] border border-[var(--border-subtle)] text-xs text-[var(--text-primary)] hover:border-[var(--border-strong)] active:scale-[0.98] transition-transform"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[var(--surface-subtle)] border border-[var(--border-subtle)] text-xs text-[var(--text-primary)] hover:border-sky-500/50 active:scale-95 transition-all"
                   >
                     <span className="font-medium">{preset.name}</span>
-                    <span className="text-[10px] text-[var(--text-muted)] font-mono">
+                    <span className="text-[10px] text-sky-400 font-mono">
                       +{preset.shelf_life_days.fridge ?? preset.shelf_life_days.pantry ?? 3}д
                     </span>
                   </button>
@@ -191,7 +221,7 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
             {/* Storage Zone Selector */}
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-[var(--text-muted)]">
-                Зона хранения
+                Куда кладем
               </label>
               <div className="grid grid-cols-3 gap-2">
                 {STORAGE_OPTIONS.map(({ type, label, icon: Icon }) => {
@@ -201,10 +231,10 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
                       key={type}
                       type="button"
                       onClick={() => handleStorageChange(type)}
-                      className={`flex items-center justify-center gap-1.5 py-2 rounded-lg border text-xs font-medium transition-all ${
+                      className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl border text-xs font-medium transition-all ${
                         isSelected
-                          ? 'bg-[var(--surface-subtle)] border-[var(--border-strong)] text-[var(--text-primary)] font-semibold'
-                          : 'bg-transparent border-[var(--border-subtle)] text-[var(--text-muted)]'
+                          ? 'bg-sky-500/15 border-sky-500 text-sky-400 font-semibold'
+                          : 'bg-[var(--surface-subtle)] border-transparent text-[var(--text-muted)]'
                       }`}
                     >
                       <Icon className="w-3.5 h-3.5" />
@@ -221,11 +251,11 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
                 <label className="text-xs font-medium text-[var(--text-muted)]">
                   Количество
                 </label>
-                <div className="flex items-center justify-between px-2 py-1 rounded-lg bg-[var(--surface-subtle)] border border-[var(--border-subtle)]">
+                <div className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-[var(--surface-subtle)] border border-[var(--border-subtle)]">
                   <button
                     type="button"
                     onClick={() => handleQuantityChange(-1)}
-                    className="p-1 rounded hover:bg-zinc-700/30 active:scale-95 text-[var(--text-primary)]"
+                    className="p-1 rounded-lg hover:bg-zinc-700/40 active:scale-95 text-[var(--text-primary)]"
                   >
                     <Minus className="w-4 h-4" />
                   </button>
@@ -233,7 +263,7 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
                   <button
                     type="button"
                     onClick={() => handleQuantityChange(1)}
-                    className="p-1 rounded hover:bg-zinc-700/30 active:scale-95 text-[var(--text-primary)]"
+                    className="p-1 rounded-lg hover:bg-zinc-700/40 active:scale-95 text-[var(--text-primary)]"
                   >
                     <Plus className="w-4 h-4" />
                   </button>
@@ -244,15 +274,15 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
                 <label className="text-xs font-medium text-[var(--text-muted)]">
                   Единицы
                 </label>
-                <div className="flex rounded-lg bg-[var(--surface-subtle)] border border-[var(--border-subtle)] p-0.5">
+                <div className="flex rounded-xl bg-[var(--surface-subtle)] border border-[var(--border-subtle)] p-0.5">
                   {UNIT_OPTIONS.map(({ unit: u, label }) => (
                     <button
                       key={u}
                       type="button"
                       onClick={() => handleUnitChange(u)}
-                      className={`flex-1 py-1.5 rounded text-xs font-mono transition-all ${
+                      className={`flex-1 py-1.5 rounded-lg text-xs font-mono transition-all ${
                         unit === u
-                          ? 'bg-[var(--surface-card)] text-[var(--text-primary)] font-semibold shadow-xs'
+                          ? 'bg-sky-500 text-slate-950 font-semibold shadow-xs'
                           : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                       }`}
                     >
@@ -266,24 +296,24 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
             {/* Expiration Date */}
             <div className="space-y-1.5">
               <label htmlFor="expiry-date" className="text-xs font-medium text-[var(--text-muted)]">
-                Годен до
+                Срок годности (до)
               </label>
               <input
                 id="expiry-date"
                 type="date"
                 value={expiresAt}
                 onChange={(e) => setExpiresAt(e.target.value)}
-                className="w-full px-3.5 py-2 rounded-lg bg-[var(--surface-subtle)] border border-[var(--border-subtle)] text-xs text-[var(--text-primary)] font-mono focus:outline-none"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--surface-subtle)] border border-[var(--border-subtle)] text-xs text-[var(--text-primary)] font-mono focus:outline-none focus:border-sky-500/50"
               />
             </div>
 
             {/* Submit Button */}
             <button
               type="submit"
-              className="w-full flex items-center justify-center gap-2 py-3 rounded-lg bg-[var(--tg-button)] text-[var(--tg-button-text)] text-sm font-semibold active:scale-[0.985] transition-transform"
+              className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 text-sm font-semibold active:scale-[0.985] transition-all shadow-md"
             >
               <Check className="w-4 h-4" />
-              <span>Сохранить в инвентарь</span>
+              <span>Добавить в холодильник</span>
             </button>
           </form>
         </Drawer.Content>

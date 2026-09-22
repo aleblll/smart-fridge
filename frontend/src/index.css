@@ -13,14 +13,14 @@
 }
 
 :root {
-  /* Системные переменные Telegram WebApp с безопасными fallback-значениями */
-  --tg-bg: var(--tg-theme-bg-color, #09090b);
-  --tg-secondary-bg: var(--tg-theme-secondary-bg-color, #121215);
-  --tg-section-bg: var(--tg-theme-section-bg-color, #18181b);
-  --tg-text: var(--tg-theme-text-color, #f4f4f5);
-  --tg-hint: var(--tg-theme-hint-color, #71717a);
-  --tg-button: var(--tg-theme-button-color, #fafafa);
-  --tg-button-text: var(--tg-theme-button-text-color, #09090b);
+  /* Системные переменные Telegram WebApp с глубоким контрастом */
+  --tg-bg: var(--tg-theme-bg-color, #0c0d0e);
+  --tg-secondary-bg: var(--tg-theme-secondary-bg-color, #16181a);
+  --tg-section-bg: var(--tg-theme-section-bg-color, #1f2226);
+  --tg-text: var(--tg-theme-text-color, #f8fafc);
+  --tg-hint: var(--tg-theme-hint-color, #94a3b8);
+  --tg-button: var(--tg-theme-button-color, #38bdf8);
+  --tg-button-text: var(--tg-theme-button-text-color, #0f172a);
 
   /* Семантические токены поверхностей */
   --surface-ground: var(--tg-bg);
@@ -38,16 +38,16 @@
 
 @media (prefers-color-scheme: light) {
   :root {
-    --tg-bg: var(--tg-theme-bg-color, #ffffff);
-    --tg-secondary-bg: var(--tg-theme-secondary-bg-color, #f4f4f5);
-    --tg-section-bg: var(--tg-theme-section-bg-color, #e4e4e7);
-    --tg-text: var(--tg-theme-text-color, #09090b);
-    --tg-hint: var(--tg-theme-hint-color, #71717a);
-    --tg-button: var(--tg-theme-button-color, #18181b);
+    --tg-bg: var(--tg-theme-bg-color, #f8fafc);
+    --tg-secondary-bg: var(--tg-theme-secondary-bg-color, #ffffff);
+    --tg-section-bg: var(--tg-theme-section-bg-color, #f1f5f9);
+    --tg-text: var(--tg-theme-text-color, #0f172a);
+    --tg-hint: var(--tg-theme-hint-color, #64748b);
+    --tg-button: var(--tg-theme-button-color, #0284c7);
     --tg-button-text: var(--tg-theme-button-text-color, #ffffff);
 
-    --border-subtle: rgba(0, 0, 0, 0.06);
-    --border-strong: rgba(0, 0, 0, 0.12);
+    --border-subtle: rgba(0, 0, 0, 0.07);
+    --border-strong: rgba(0, 0, 0, 0.14);
   }
 }
 
@@ -59,4 +59,14 @@ body {
   min-height: 100dvh;
   overflow-x: hidden;
   -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+/* Hide scrollbar for category pills */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
