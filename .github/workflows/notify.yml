@@ -27,8 +27,8 @@ jobs:
 
       - name: Execute Notification Script
         env:
-          CLOUDFLARE_WORKER_URL: ${{ secrets.CLOUDFLARE_WORKER_URL }}
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_APP_URL: ${{ secrets.TELEGRAM_APP_URL }}
+          CLOUDFLARE_WORKER_URL: ${{ secrets.CLOUDFLARE_WORKER_URL || vars.CLOUDFLARE_WORKER_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET || vars.CRON_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN || vars.TELEGRAM_BOT_TOKEN || secrets.BOT_TOKEN || vars.BOT_TOKEN }}
+          TELEGRAM_APP_URL: ${{ secrets.TELEGRAM_APP_URL || vars.TELEGRAM_APP_URL }}
         run: node scripts/notify.mjs
