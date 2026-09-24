@@ -35,41 +35,41 @@ export const ShareModal: React.FC<ShareModalProps> = ({ open, onClose, userId })
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs">
-      <div className="w-full max-w-sm rounded-3xl bg-[var(--surface-card)] border border-[var(--border-strong)] p-5 space-y-4 shadow-xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs">
+      <div className="w-full max-w-sm rounded-3xl bg-[#1F2B28] border border-white/[0.08] p-5 space-y-4 shadow-xl text-[#F1F5F4]">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-[var(--text-primary)]">
-            <Users className="w-5 h-5 text-sky-400" />
-            <h3 className="text-base font-bold">Семейный доступ</h3>
+          <div className="flex items-center gap-2">
+            <Users className="w-5 h-5 text-[#5E8B7E]" />
+            <h3 className="text-base font-semibold">Семейный доступ</h3>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-full hover:bg-zinc-800 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+            className="p-1.5 rounded-full hover:bg-[#2A3834] text-[#8FA39D] hover:text-[#F1F5F4] transition-all"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        <p className="text-xs text-[var(--text-muted)] leading-relaxed">
+        <p className="text-xs text-[#8FA39D] leading-relaxed">
           Отправьте ссылку членам семьи или соседям, чтобы вести учет продуктов вместе в реальном времени.
         </p>
 
         {/* Link Box */}
-        <div className="flex items-center gap-2 p-2.5 rounded-xl bg-[var(--surface-subtle)] border border-[var(--border-subtle)]">
+        <div className="flex items-center gap-2 p-2.5 rounded-xl bg-[#2A3834] border border-white/[0.06]">
           <input
             type="text"
             readOnly
             value={inviteUrl}
-            className="flex-1 bg-transparent text-xs text-[var(--text-primary)] font-mono outline-none truncate"
+            className="flex-1 bg-transparent text-xs text-[#F1F5F4] font-mono outline-none truncate"
           />
           <button
             type="button"
             onClick={handleCopy}
-            className="p-2 rounded-lg bg-[var(--surface-card)] text-sky-400 hover:text-sky-300 active:scale-95 transition-all"
+            className="p-2 rounded-lg bg-[#222E2B] text-[#5E8B7E] hover:text-[#A7C7E7] active:scale-95 transition-all"
             title="Скопировать ссылку"
           >
-            {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+            {copied ? <Check className="w-4 h-4 text-[#5E8B7E]" /> : <Copy className="w-4 h-4" />}
           </button>
         </div>
 
@@ -78,7 +78,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ open, onClose, userId })
           <button
             type="button"
             onClick={handleShareTelegram}
-            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-semibold active:scale-[0.985] transition-transform"
+            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-[#5E8B7E] hover:bg-[#4E756A] text-[#F1F5F4] text-xs font-semibold active:scale-[0.985] transition-transform"
           >
             <Send className="w-3.5 h-3.5" />
             <span>Отправить в чат Telegram</span>
@@ -87,7 +87,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ open, onClose, userId })
           <button
             type="button"
             onClick={handleCopy}
-            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-[var(--surface-subtle)] text-[var(--text-primary)] text-xs font-medium hover:bg-zinc-800 active:scale-[0.985] transition-all"
+            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-[#2A3834] text-[#F1F5F4] text-xs font-medium hover:bg-[#344641] active:scale-[0.985] transition-all"
           >
             <QrCode className="w-3.5 h-3.5" />
             <span>{copied ? 'Ссылка скопирована в буфер!' : 'Скопировать ссылку'}</span>

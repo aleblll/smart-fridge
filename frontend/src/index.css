@@ -4,6 +4,13 @@
   --color-surface-ground: var(--surface-ground);
   --color-surface-card: var(--surface-card);
   --color-surface-subtle: var(--surface-subtle);
+  --color-surface-modal: var(--surface-modal);
+  --color-brand-sage: #5E8B7E;
+  --color-brand-sky: #A7C7E7;
+  --color-brand-petrol: #2F3E46;
+  --color-brand-coral: #EBAEB7;
+  --color-brand-porcelain: #F1F5F4;
+  --color-brand-muted: #8FA39D;
   --color-text-primary: var(--text-primary);
   --color-text-muted: var(--text-muted);
   --color-border-subtle: var(--border-subtle);
@@ -13,46 +20,54 @@
 }
 
 :root {
-  /* Системные переменные Telegram WebApp с глубоким контрастом */
-  --tg-bg: var(--tg-theme-bg-color, #0c0d0e);
-  --tg-secondary-bg: var(--tg-theme-secondary-bg-color, #16181a);
-  --tg-section-bg: var(--tg-theme-section-bg-color, #1f2226);
-  --tg-text: var(--tg-theme-text-color, #f8fafc);
-  --tg-hint: var(--tg-theme-hint-color, #94a3b8);
-  --tg-button: var(--tg-theme-button-color, #38bdf8);
-  --tg-button-text: var(--tg-theme-button-text-color, #0f172a);
+  /* Mindora Organic Wellness & Calm Tech Dark Palette */
+  --tg-bg: var(--tg-theme-bg-color, #1A2421);
+  --tg-secondary-bg: var(--tg-theme-secondary-bg-color, #222E2B);
+  --tg-section-bg: var(--tg-theme-section-bg-color, #2F3E46);
+  --tg-text: var(--tg-theme-text-color, #F1F5F4);
+  --tg-hint: var(--tg-theme-hint-color, #8FA39D);
+  --tg-button: #5E8B7E;
+  --tg-button-text: #F1F5F4;
 
-  /* Семантические токены поверхностей */
-  --surface-ground: var(--tg-bg);
-  --surface-card: var(--tg-secondary-bg);
-  --surface-subtle: var(--tg-section-bg);
+  /* Semantic Mindora Tokens */
+  --surface-ground: #1A2421;
+  --surface-card: #222E2B;
+  --surface-subtle: #2A3834;
+  --surface-modal: #1F2B28;
   
-  /* Токены текста */
-  --text-primary: var(--tg-text);
-  --text-muted: var(--tg-hint);
+  /* Text */
+  --text-primary: #F1F5F4;
+  --text-muted: #8FA39D;
   
-  /* Токены границ (Hairline micro-borders) */
-  --border-subtle: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.16);
+  /* Subtle Mindora Hairline Micro-borders */
+  --border-subtle: rgba(241, 245, 244, 0.07);
+  --border-strong: rgba(241, 245, 244, 0.15);
 }
 
 @media (prefers-color-scheme: light) {
   :root {
-    --tg-bg: var(--tg-theme-bg-color, #f8fafc);
-    --tg-secondary-bg: var(--tg-theme-secondary-bg-color, #ffffff);
-    --tg-section-bg: var(--tg-theme-section-bg-color, #f1f5f9);
-    --tg-text: var(--tg-theme-text-color, #0f172a);
-    --tg-hint: var(--tg-theme-hint-color, #64748b);
-    --tg-button: var(--tg-theme-button-color, #0284c7);
-    --tg-button-text: var(--tg-theme-button-text-color, #ffffff);
+    --tg-bg: var(--tg-theme-bg-color, #F4F7F6);
+    --tg-secondary-bg: var(--tg-theme-secondary-bg-color, #FFFFFF);
+    --tg-section-bg: var(--tg-theme-section-bg-color, #E8EFEF);
+    --tg-text: var(--tg-theme-text-color, #1A2421);
+    --tg-hint: var(--tg-theme-hint-color, #6B8079);
+    --tg-button: #5E8B7E;
+    --tg-button-text: #FFFFFF;
 
-    --border-subtle: rgba(0, 0, 0, 0.07);
-    --border-strong: rgba(0, 0, 0, 0.14);
+    --surface-ground: #F4F7F6;
+    --surface-card: #FFFFFF;
+    --surface-subtle: #E8EFEF;
+    --surface-modal: #FFFFFF;
+    --text-primary: #1A2421;
+    --text-muted: #6B8079;
+
+    --border-subtle: rgba(26, 36, 33, 0.07);
+    --border-strong: rgba(26, 36, 33, 0.14);
   }
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Inter", sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Inter", "DM Sans", sans-serif;
   background-color: var(--surface-ground);
   color: var(--text-primary);
   min-height: 100vh;
@@ -62,7 +77,7 @@ body {
   user-select: none;
 }
 
-/* Hide scrollbar for category pills */
+/* Hide scrollbars cleanly */
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
