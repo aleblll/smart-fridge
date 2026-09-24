@@ -9,6 +9,7 @@ interface ProductCardProps {
   onConsume?: (id: string) => void;
   onDiscard?: (id: string) => void;
   onRestore?: (id: string) => void;
+  onDelete?: (id: string) => void;
 }
 
 export const ProductCard: React.FC<ProductCardProps> = ({
@@ -16,6 +17,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   onConsume,
   onDiscard,
   onRestore,
+  onDelete,
 }) => {
   const { daysLeft, spentPercent, statusTag } = calculateFreshnessMetrics(
     product.expires_at,
@@ -71,6 +73,11 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   const handleRestore = () => {
     haptic.impact('light');
     onRestore?.(product.id);
+  };
+
+  const handleDelete = () => {
+    haptic.impact('medium');
+    onDelete?.(product.id);
   };
 
   const isArchived = product.status !== 'active';
@@ -135,14 +142,26 @@ export const ProductCard: React.FC<ProductCardProps> = ({
         {/* Action Buttons */}
         <div className="flex items-center gap-1.5">
           {isArchived ? (
-            <button
-              type="button"
-              onClick={handleRestore}
-              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-[var(--surface-subtle)] text-xs text-[var(--text-primary)] font-medium hover:bg-zinc-800 active:scale-95 transition-all"
-            >
-              <RotateCcw className="w-3 h-3 text-sky-400" />
-              <span>Вернуть</span>
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={handleRestore}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-[var(--surface-subtle)] text-xs text-[var(--text-primary)] font-medium hover:bg-zinc-800 active:scale-95 transition-all"
+              >
+                <RotateCcw className="w-3 h-3 text-sky-400" />
+                <span>Вернуть</span>
+              </button>
+              {onDelete && (
+                <button
+                  type="button"
+                  onClick={handleDelete}
+                  title="Удалить навсегда"
+                  className="p-1.5 rounded-xl hover:bg-rose-500/15 text-[var(--text-muted)] hover:text-rose-400 active:scale-90 transition-all"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
           ) : (
             <>
               <button

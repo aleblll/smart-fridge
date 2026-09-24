@@ -4,7 +4,23 @@ import { logger } from '@/lib/logger';
 const STORAGE_KEY = 'smart_fridge_products_v2';
 
 export const storage = {
-  async loadProducts(): Promise<ProductItem[]> {
+  getInitialProducts(): ProductItem[] | null {
+    if (typeof window === 'undefined') return null;
+    try {
+      const local = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem('smart_fridge_inventory');
+      if (local !== null && local !== '') {
+        const parsed = JSON.parse(local);
+        if (Array.isArray(parsed)) {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      logger.error('STORAGE', `Failed parsing initial localStorage: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    return null;
+  },
+
+  async loadProducts(): Promise<ProductItem[] | null> {
     logger.info('STORAGE', 'Loading products...');
 
     // 1. Try Telegram CloudStorage if inside Telegram
@@ -14,7 +30,7 @@ export const storage = {
         const cloudData = await Promise.race([
           new Promise<string | null>((resolve) => {
             cs.getItem(STORAGE_KEY, (err: Error | null, val?: string) => {
-              if (!err && val) {
+              if (!err && val !== undefined && val !== null && val !== '') {
                 logger.sync(`CloudStorage read successful: ${val.length} bytes`);
                 resolve(val);
               } else {
@@ -26,9 +42,9 @@ export const storage = {
           new Promise<string | null>((resolve) => setTimeout(() => resolve(null), 1500)),
         ]);
 
-        if (cloudData) {
+        if (cloudData !== null) {
           const parsed = JSON.parse(cloudData);
-          if (Array.isArray(parsed) && parsed.length > 0) {
+          if (Array.isArray(parsed)) {
             localStorage.setItem(STORAGE_KEY, cloudData);
             logger.info('STORAGE', `Loaded ${parsed.length} products from CloudStorage`);
             return parsed;
@@ -41,18 +57,22 @@ export const storage = {
 
     // 2. Fallback to localStorage
     try {
-      const local = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('smart_fridge_inventory');
-      if (local) {
-        const parsed = JSON.parse(local);
-        logger.info('STORAGE', `Loaded ${parsed.length} products from localStorage fallback`);
-        return parsed;
+      if (typeof window !== 'undefined') {
+        const local = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem('smart_fridge_inventory');
+        if (local !== null && local !== '') {
+          const parsed = JSON.parse(local);
+          if (Array.isArray(parsed)) {
+            logger.info('STORAGE', `Loaded ${parsed.length} products from localStorage fallback`);
+            return parsed;
+          }
+        }
       }
     } catch (e) {
       logger.error('STORAGE', `Failed parsing localStorage: ${e instanceof Error ? e.message : String(e)}`);
     }
 
-    logger.info('STORAGE', 'No saved products found, using initial preset defaults');
-    return [];
+    logger.info('STORAGE', 'No saved products found, returning null');
+    return null;
   },
 
   async saveProducts(products: ProductItem[]): Promise<void> {

@@ -81,14 +81,21 @@ function MainScreen() {
   const [activeZone, setActiveZone] = useState<StorageType | 'all'>('all');
   const [selectedCategory, setSelectedCategory] = useState<string>('Все');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [products, setProducts] = useState<ProductItem[]>(INITIAL_DEMO_PRODUCTS);
+  const [products, setProducts] = useState<ProductItem[]>(() => {
+    const cached = storage.getInitialProducts();
+    return cached !== null ? cached : INITIAL_DEMO_PRODUCTS;
+  });
   const [isLoaded, setIsLoaded] = useState(false);
 
   // Load products on start from Telegram CloudStorage / localStorage
   useEffect(() => {
     storage.loadProducts().then((loaded) => {
-      if (loaded && loaded.length > 0) {
+      if (loaded !== null) {
         setProducts(loaded);
+      } else {
+        // First-time user with no stored data: seed demo products
+        setProducts(INITIAL_DEMO_PRODUCTS);
+        storage.saveProducts(INITIAL_DEMO_PRODUCTS);
       }
       setIsLoaded(true);
     });
@@ -122,6 +129,12 @@ function MainScreen() {
       )
     );
     logger.info('INVENTORY', `Item ${id} status changed to ${newStatus}`);
+  };
+
+  // Permanently delete product
+  const handleDeleteProduct = (id: string) => {
+    setProducts((prev) => prev.filter((p) => p.id !== id));
+    logger.info('INVENTORY', `Item ${id} permanently removed`);
   };
 
   // Count items
@@ -373,6 +386,7 @@ function MainScreen() {
               onConsume={() => setProductStatus(product.id, 'consumed')}
               onDiscard={() => setProductStatus(product.id, 'discarded')}
               onRestore={() => setProductStatus(product.id, 'active')}
+              onDelete={handleDeleteProduct}
             />
           ))
         )}
