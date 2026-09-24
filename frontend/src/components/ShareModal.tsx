@@ -35,8 +35,8 @@ export const ShareModal: React.FC<ShareModalProps> = ({ open, onClose, userId })
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs">
-      <div className="w-full max-w-sm rounded-3xl bg-[#1F2B28] border border-white/[0.08] p-5 space-y-4 shadow-xl text-[#F1F5F4]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
+      <div className="w-full max-w-sm rounded-3xl backdrop-blur-2xl bg-[#1A2421]/95 border border-white/[0.08] p-5 space-y-4 shadow-[inset_0_1px_1px_rgba(255,255,255,0.08),0_12px_32px_rgba(0,0,0,0.5)] text-[#F1F5F4]">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Users className="w-5 h-5 text-[#5E8B7E]" />
@@ -45,7 +45,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ open, onClose, userId })
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-full hover:bg-[#2A3834] text-[#8FA39D] hover:text-[#F1F5F4] transition-all"
+            className="p-1.5 rounded-full hover:bg-white/[0.08] text-[#8FA39D] hover:text-[#F1F5F4] transition-all"
           >
             <X className="w-4 h-4" />
           </button>
@@ -56,7 +56,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ open, onClose, userId })
         </p>
 
         {/* Link Box */}
-        <div className="flex items-center gap-2 p-2.5 rounded-xl bg-[#2A3834] border border-white/[0.06]">
+        <div className="flex items-center gap-2 p-2.5 rounded-xl bg-white/[0.04] border border-white/[0.06]">
           <input
             type="text"
             readOnly
@@ -66,7 +66,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ open, onClose, userId })
           <button
             type="button"
             onClick={handleCopy}
-            className="p-2 rounded-lg bg-[#222E2B] text-[#5E8B7E] hover:text-[#A7C7E7] active:scale-95 transition-all"
+            className="p-2 rounded-lg bg-white/[0.06] text-[#5E8B7E] hover:text-[#A7C7E7] active:scale-95 transition-all"
             title="Скопировать ссылку"
           >
             {copied ? <Check className="w-4 h-4 text-[#5E8B7E]" /> : <Copy className="w-4 h-4" />}
@@ -78,7 +78,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ open, onClose, userId })
           <button
             type="button"
             onClick={handleShareTelegram}
-            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-[#5E8B7E] hover:bg-[#4E756A] text-[#F1F5F4] text-xs font-semibold active:scale-[0.985] transition-transform"
+            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-[#5E8B7E] to-[#486e63] text-[#F1F5F4] text-xs font-semibold shadow-lg shadow-[#5E8B7E]/20 hover:brightness-105 active:scale-[0.985] transition-all"
           >
             <Send className="w-3.5 h-3.5" />
             <span>Отправить в чат Telegram</span>

@@ -86,13 +86,13 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   return (
     <div
       onClick={handleCardClick}
-      className={`group relative rounded-2xl bg-[#222E2B] border border-white/[0.06] p-3.5 transition-all duration-200 cursor-pointer active:scale-[0.99] select-none ${
-        isArchived ? 'opacity-70' : 'hover:border-white/[0.12]'
+      className={`group relative rounded-2xl backdrop-blur-xl bg-white/[0.04] border border-white/[0.08] shadow-[inset_0_1px_1px_rgba(255,255,255,0.08),0_12px_32px_rgba(0,0,0,0.25)] p-3.5 transition-all duration-200 cursor-pointer active:scale-[0.99] select-none ${
+        isArchived ? 'opacity-65' : 'hover:border-white/[0.14]'
       }`}
     >
       <div className="flex items-center gap-3.5">
         {/* Food Visual Hero (25-35% expressive image/emoji container) */}
-        <div className="w-14 h-14 shrink-0 rounded-xl bg-[#2A3834] border border-white/[0.04] flex items-center justify-center text-2xl shadow-inner transition-transform group-hover:scale-105">
+        <div className="w-14 h-14 shrink-0 rounded-xl backdrop-blur-md bg-white/[0.03] border border-white/[0.06] flex items-center justify-center text-2xl shadow-inner transition-transform group-hover:scale-105">
           <span>{visual.emoji}</span>
         </div>
 
@@ -138,20 +138,48 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           )}
         </div>
 
-        {/* Minimal indicator to hint expandability */}
-        <div className="shrink-0 text-[#8FA39D]/40 pl-1">
-          <ChevronRight className={`w-4 h-4 transition-transform duration-200 ${isExpanded ? 'rotate-90 text-[#8FA39D]' : ''}`} />
-        </div>
+        {/* Right Action: Quick Check button for active items (1-tap consume) */}
+        {!isArchived ? (
+          <div className="flex items-center gap-2 shrink-0 pl-1">
+            <button
+              type="button"
+              onClick={handleConsume}
+              className="w-9 h-9 rounded-full bg-gradient-to-r from-[#5E8B7E] to-[#486e63] text-[#F1F5F4] shadow-lg shadow-[#5E8B7E]/25 hover:brightness-110 active:scale-90 transition-all flex items-center justify-center border border-white/10 shrink-0"
+              title="Отметить съеденным (в 1 тап)"
+              aria-label="Отметить съеденным"
+            >
+              <Check className="w-4 h-4 stroke-[2.5]" />
+            </button>
+            <div className="text-[#8FA39D]/40">
+              <ChevronRight
+                className={`w-4 h-4 transition-transform duration-200 ${
+                  isExpanded ? 'rotate-90 text-[#8FA39D]' : ''
+                }`}
+              />
+            </div>
+          </div>
+        ) : (
+          <div className="shrink-0 text-[#8FA39D]/40 pl-1">
+            <ChevronRight
+              className={`w-4 h-4 transition-transform duration-200 ${
+                isExpanded ? 'rotate-90 text-[#8FA39D]' : ''
+              }`}
+            />
+          </div>
+        )}
       </div>
 
       {/* Contextual Action Drawer / Quick Actions (Revealed cleanly on tap) */}
       {isExpanded && (
         <div
           onClick={(e) => e.stopPropagation()}
-          className="mt-3 pt-3 border-t border-white/[0.06] flex items-center justify-between animate-fadeIn"
+          className="mt-3 pt-3 border-t border-white/[0.06] flex items-center justify-between animate-fadeIn text-xs"
         >
-          <div className="text-[11px] text-[#8FA39D] font-mono">
-            Годен до {product.expires_at}
+          <div className="space-y-0.5 text-[11px] text-[#8FA39D]">
+            <div className="font-mono">Годен до {product.expires_at}</div>
+            {product.created_at && (
+              <div className="text-[10px] text-[#8FA39D]/60">Создан {product.created_at.slice(0, 10)}</div>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
@@ -160,7 +188,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                 <button
                   type="button"
                   onClick={handleRestore}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#2A3834] text-xs text-[#F1F5F4] hover:bg-[#344641] active:scale-95 transition-all"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl backdrop-blur-md bg-white/[0.05] border border-white/[0.06] text-xs text-[#F1F5F4] hover:bg-white/[0.08] active:scale-95 transition-all shadow-xs"
                 >
                   <RotateCcw className="w-3.5 h-3.5 text-[#A7C7E7]" />
                   <span>Вернуть</span>
@@ -181,7 +209,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                 <button
                   type="button"
                   onClick={handleDiscard}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#2A3834] text-xs text-[#EBAEB7] hover:bg-rose-950/30 active:scale-95 transition-all"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-xs text-[#EBAEB7] border border-rose-500/20 active:scale-95 transition-all shadow-xs"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   <span>В утиль</span>
@@ -189,7 +217,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                 <button
                   type="button"
                   onClick={handleConsume}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#5E8B7E] text-xs text-[#F1F5F4] font-medium hover:bg-[#4E756A] active:scale-95 transition-all shadow-xs"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-[#5E8B7E] to-[#486e63] text-xs text-[#F1F5F4] font-medium shadow-md shadow-[#5E8B7E]/20 hover:brightness-105 active:scale-95 transition-all"
                 >
                   <Check className="w-3.5 h-3.5 stroke-[2.5]" />
                   <span>Съедено</span>

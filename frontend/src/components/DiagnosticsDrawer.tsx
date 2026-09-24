@@ -39,9 +39,9 @@ export const DiagnosticsDrawer: React.FC<DiagnosticsDrawerProps> = ({ open, onOp
     <Drawer.Root open={open} onOpenChange={onOpenChange}>
       <Drawer.Portal>
         <Drawer.Overlay className="fixed inset-0 bg-black/80 backdrop-blur-xs z-50 transition-opacity" />
-        <Drawer.Content className="fixed bottom-0 left-0 right-0 max-w-lg mx-auto bg-[#1F2B28] border-t border-white/[0.08] rounded-t-3xl z-50 p-5 pb-8 space-y-4 outline-none max-h-[85vh] flex flex-col text-[#F1F5F4]">
+        <Drawer.Content className="fixed bottom-0 left-0 right-0 max-w-lg mx-auto backdrop-blur-2xl bg-[#1A2421]/95 border-t border-white/[0.08] rounded-t-3xl z-50 p-5 pb-8 space-y-4 outline-none max-h-[85vh] flex flex-col text-[#F1F5F4] shadow-[0_-12px_40px_rgba(0,0,0,0.5)]">
           <div className="flex justify-center pb-1">
-            <div className="w-12 h-1.5 rounded-full bg-[#344641]" />
+            <div className="w-12 h-1.5 rounded-full bg-white/20" />
           </div>
 
           <div className="flex items-center justify-between">

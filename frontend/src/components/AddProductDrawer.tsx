@@ -175,10 +175,10 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
     <Drawer.Root open={open} onOpenChange={onOpenChange}>
       <Drawer.Portal>
         <Drawer.Overlay className="fixed inset-0 bg-black/80 backdrop-blur-xs z-50 transition-opacity" />
-        <Drawer.Content className="fixed bottom-0 left-0 right-0 max-w-lg mx-auto bg-[#1F2B28] border-t border-white/[0.08] rounded-t-3xl z-50 p-5 space-y-4 outline-none max-h-[92vh] flex flex-col text-[#F1F5F4]">
+        <Drawer.Content className="fixed bottom-0 left-0 right-0 max-w-lg mx-auto backdrop-blur-2xl bg-[#1A2421]/95 border-t border-white/[0.08] rounded-t-3xl z-50 p-5 space-y-4 outline-none max-h-[92vh] flex flex-col text-[#F1F5F4] shadow-[0_-12px_40px_rgba(0,0,0,0.5)]">
           {/* Drawer Handle */}
           <div className="flex justify-center pb-0.5">
-            <div className="w-12 h-1.5 rounded-full bg-[#344641]" />
+            <div className="w-12 h-1.5 rounded-full bg-white/20" />
           </div>
 
           {/* Drawer Header */}
@@ -396,9 +396,9 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
             <button
               type="submit"
               form="add-product-form"
-              className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl bg-[#5E8B7E] hover:bg-[#4E756A] text-[#F1F5F4] text-sm font-semibold active:scale-[0.985] transition-all shadow-md shadow-[#161F1D]"
+              className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl bg-gradient-to-r from-[#5E8B7E] to-[#486e63] text-[#F1F5F4] text-sm font-semibold shadow-lg shadow-[#5E8B7E]/20 hover:brightness-105 active:scale-[0.985] transition-all"
             >
-              <Check className="w-4 h-4" />
+              <Check className="w-4 h-4 stroke-[2.5]" />
               <span>Положить в холодильник</span>
             </button>
           </div>

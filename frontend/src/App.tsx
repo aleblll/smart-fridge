@@ -3,7 +3,8 @@ import { TelegramProvider } from '@/context/TelegramContext';
 import { useTelegramWebApp } from '@/hooks/useTelegramWebApp';
 import { AddProductDrawer } from '@/components/AddProductDrawer';
 import { ProductCard } from '@/components/ProductCard';
-import { EveningIdeaCard } from '@/components/EveningIdeaCard';
+import { EveningIdeaCard, type RecipeIdea } from '@/components/EveningIdeaCard';
+import { CookRecipeModal } from '@/components/CookRecipeModal';
 import { ShareModal } from '@/components/ShareModal';
 import { DiagnosticsDrawer } from '@/components/DiagnosticsDrawer';
 import { storage } from '@/lib/storage';
@@ -78,6 +79,8 @@ function MainScreen() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [diagOpen, setDiagOpen] = useState(false);
+  const [cookingRecipe, setCookingRecipe] = useState<RecipeIdea | null>(null);
+  const [cookModalOpen, setCookModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'inventory' | 'consumed' | 'discarded'>('inventory');
   const [activeZone, setActiveZone] = useState<StorageType | 'all'>('all');
   const [selectedCategory, setSelectedCategory] = useState<string>('Все');
@@ -129,6 +132,25 @@ function MainScreen() {
       )
     );
     logger.info('INVENTORY', `Item ${id} status changed to ${newStatus}`);
+  };
+
+  // Handle cooking recipe: open recipe modal
+  const handleCookRecipe = (recipe: RecipeIdea) => {
+    setCookingRecipe(recipe);
+    setCookModalOpen(true);
+  };
+
+  // Handle consuming recipe ingredients
+  const handleConsumeRecipeIngredients = (productIds: string[]) => {
+    setProducts((prev) =>
+      prev.map((p) =>
+        productIds.includes(p.id)
+          ? { ...p, status: 'consumed' as ProductStatus, updated_at: new Date().toISOString() }
+          : p
+      )
+    );
+    setCookModalOpen(false);
+    logger.info('COOKING', `Consumed ${productIds.length} ingredients for recipe "${cookingRecipe?.title}"`);
   };
 
   // Permanently delete product
@@ -203,9 +225,9 @@ function MainScreen() {
   }, [products, activeTab, activeZone, selectedCategory, searchQuery]);
 
   return (
-    <div className="min-h-screen bg-[#1A2421] text-[#F1F5F4] px-4 py-5 max-w-md mx-auto space-y-4 pb-28">
-      {/* 1. HERO-БЛОК СВЕЖЕСТИ (Mindora Calming Wellness Style) */}
-      <header className="rounded-2xl bg-[#222E2B] border border-white/[0.06] p-4 space-y-3 shadow-xs">
+    <div className="min-h-screen text-[#F1F5F4] px-4 py-5 max-w-md mx-auto space-y-4 pb-28">
+      {/* 1. HERO-БЛОК СВЕЖЕСТИ (Mindora Calming Wellness Frosted Glass) */}
+      <header className="rounded-2xl backdrop-blur-xl bg-white/[0.04] border border-white/[0.08] shadow-[inset_0_1px_1px_rgba(255,255,255,0.08),0_12px_32px_rgba(0,0,0,0.25)] p-4 space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-semibold tracking-tight text-[#F1F5F4]">
@@ -223,7 +245,7 @@ function MainScreen() {
                 haptic.impact('light');
                 setDiagOpen(true);
               }}
-              className="p-2 rounded-xl bg-[#2A3834] text-[#8FA39D] hover:text-[#F1F5F4] active:scale-95 transition-all"
+              className="p-2 rounded-xl backdrop-blur-md bg-white/[0.05] border border-white/[0.06] text-[#8FA39D] hover:text-[#F1F5F4] hover:bg-white/[0.08] active:scale-95 transition-all shadow-xs"
               title="Диагностика"
             >
               <Terminal className="w-3.5 h-3.5" />
@@ -235,7 +257,7 @@ function MainScreen() {
                 haptic.impact('light');
                 setShareModalOpen(true);
               }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#2A3834] text-xs font-medium text-[#F1F5F4] hover:bg-[#344641] active:scale-95 transition-all"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl backdrop-blur-md bg-white/[0.05] border border-white/[0.06] text-xs font-medium text-[#F1F5F4] hover:bg-white/[0.08] active:scale-95 transition-all shadow-xs"
             >
               <Users className="w-3.5 h-3.5 text-[#5E8B7E]" />
               <span>Семья</span>
@@ -263,7 +285,7 @@ function MainScreen() {
         {/* Delicate 3px Freshness Index Line (Mindora section 12 style) */}
         {counts.active > 0 && (
           <div className="pt-1">
-            <div className="w-full bg-[#1A2421] rounded-full h-[3px] overflow-hidden flex">
+            <div className="w-full bg-white/[0.06] rounded-full h-[3px] overflow-hidden flex">
               <div
                 className="h-[3px] bg-[#5E8B7E] transition-all duration-500 rounded-l-full"
                 style={{ width: `${overallFreshnessRatio}%` }}
@@ -351,9 +373,9 @@ function MainScreen() {
         </section>
       )}
 
-      {/* 4. ПРОДУКТОВАЯ МАГИЯ: БЛОК «✦ ИДЕЯ НА ВЕЧЕР» (Mindora Modal / Card Style) */}
+      {/* 4. ПРОДУКТОВАЯ МАГИЯ: БЛОК «✦ ИДЕЯ НА ВЕЧЕР» (Mindora Frosted Glass) */}
       {activeTab === 'inventory' && activeZone === 'all' && selectedCategory === 'Все' && !searchQuery && (
-        <EveningIdeaCard products={products} />
+        <EveningIdeaCard products={products} onCookRecipe={handleCookRecipe} />
       )}
 
       {/* 5. КАТЕГОРИИ (Спокойный горизонтальный скролл без рядов одинаковых пилюль) */}
@@ -370,7 +392,7 @@ function MainScreen() {
               }}
               className={`px-3 py-1.5 rounded-xl text-xs whitespace-nowrap transition-all ${
                 isSelected
-                  ? 'bg-[#2A3834] text-[#F1F5F4] font-medium border border-white/[0.08]'
+                  ? 'backdrop-blur-md bg-white/[0.08] text-[#F1F5F4] font-medium border border-white/[0.12] shadow-xs'
                   : 'bg-transparent text-[#8FA39D] hover:text-[#F1F5F4]'
               }`}
             >
@@ -388,14 +410,14 @@ function MainScreen() {
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Поиск продуктов..."
-          className="w-full pl-9 pr-4 py-2.5 rounded-2xl bg-[#222E2B] border border-white/[0.06] text-xs text-[#F1F5F4] placeholder-[#8FA39D]/60 focus:outline-none focus:border-[#5E8B7E] transition-colors"
+          className="w-full pl-9 pr-4 py-2.5 rounded-2xl backdrop-blur-xl bg-white/[0.04] border border-white/[0.08] text-xs text-[#F1F5F4] placeholder-[#8FA39D]/60 focus:outline-none focus:border-[#5E8B7E] transition-all shadow-[inset_0_1px_1px_rgba(255,255,255,0.04)]"
         />
       </div>
 
       {/* 7. СПИСОК ПРОДУКТОВ (Карточки Mindora с главным героем — едой) */}
       <section className="space-y-2.5 pt-1">
         {displayedProducts.length === 0 ? (
-          <div className="py-12 px-6 rounded-2xl bg-[#222E2B] border border-white/[0.04] text-center space-y-2.5">
+          <div className="py-12 px-6 rounded-2xl backdrop-blur-xl bg-white/[0.04] border border-white/[0.08] shadow-[inset_0_1px_1px_rgba(255,255,255,0.08),0_12px_32px_rgba(0,0,0,0.25)] text-center space-y-2.5">
             <Sparkles className="w-7 h-7 text-[#5E8B7E] mx-auto opacity-70" />
             <div className="space-y-1">
               <p className="text-sm font-semibold text-[#F1F5F4]">
@@ -422,7 +444,7 @@ function MainScreen() {
         )}
       </section>
 
-      {/* 8. FLOATING ACTION BUTTON (Primary Mindora Sage Button #1) */}
+      {/* 8. FLOATING ACTION BUTTON (Primary Mindora Sage Button с мягким переливом) */}
       {activeTab === 'inventory' && (
         <div className="fixed bottom-5 left-0 right-0 max-w-md mx-auto px-4 pointer-events-none z-30">
           <button
@@ -431,7 +453,7 @@ function MainScreen() {
               haptic.impact('medium');
               setDrawerOpen(true);
             }}
-            className="pointer-events-auto w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl bg-[#5E8B7E] hover:bg-[#4E756A] text-[#F1F5F4] font-semibold text-sm shadow-lg shadow-[#161F1D] active:scale-[0.985] transition-all"
+            className="pointer-events-auto w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl bg-gradient-to-r from-[#5E8B7E] to-[#486e63] text-[#F1F5F4] font-semibold text-sm shadow-lg shadow-[#5E8B7E]/20 hover:brightness-105 active:scale-[0.985] transition-all"
           >
             <Plus className="w-4 h-4 stroke-[2.5]" />
             <span>Добавить продукт</span>
@@ -444,6 +466,14 @@ function MainScreen() {
         open={drawerOpen}
         onOpenChange={setDrawerOpen}
         onAddProduct={handleAddProduct}
+      />
+
+      {/* Quick Cook Recipe Drawer */}
+      <CookRecipeModal
+        open={cookModalOpen}
+        onOpenChange={setCookModalOpen}
+        recipe={cookingRecipe}
+        onConsumeIngredients={handleConsumeRecipeIngredients}
       />
 
       {/* Share Family Modal */}
