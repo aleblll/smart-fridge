@@ -99,12 +99,16 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
       setQuantity('1');
       setUnit('pcs');
       setDays(5);
+      setSelectedPreset(null);
     }
   }, [open]);
+
+  const [selectedPreset, setSelectedPreset] = useState<FoodPreset | null>(null);
 
   // Click on preset chip: autofills form
   const handleSelectPreset = (preset: FoodPreset) => {
     haptic.impact('medium');
+    setSelectedPreset(preset);
     setName(preset.name);
     setCategory(preset.category);
 
@@ -146,6 +150,7 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
       expires_at: expiresAt,
       notify_before_days: 2,
       status: 'active',
+      after_opening_hours: selectedPreset?.after_opening_hours ?? null,
     });
 
     logger.info('INVENTORY', `Added product: ${name.trim()} (${finalQuantity} ${unit}) expires: ${expiresAt}`);

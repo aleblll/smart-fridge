@@ -1,9 +1,19 @@
 import React, { useState } from 'react';
 import type { ProductItem } from '@/types';
+import { ALL_PRESETS } from '@/lib/presets';
 import { haptic } from '@/lib/haptics';
 import { calculateFreshnessMetrics } from '@/lib/freshness';
 import { getFoodVisual } from '@/lib/foodVisuals';
-import { Snowflake, Archive, Check, Trash2, RotateCcw, ChevronRight } from 'lucide-react';
+import {
+  Snowflake,
+  Archive,
+  Check,
+  Trash2,
+  RotateCcw,
+  ChevronRight,
+  Clock,
+  Box,
+} from 'lucide-react';
 
 interface ProductCardProps {
   product: ProductItem;
@@ -11,6 +21,25 @@ interface ProductCardProps {
   onDiscard?: (id: string) => void;
   onRestore?: (id: string) => void;
   onDelete?: (id: string) => void;
+  onOpenPackage?: (id: string, updates: { opened_at: string; expires_at: string }) => void;
+}
+
+/**
+ * Helper to determine hours after opening from product fields or presets database
+ */
+function getProductAfterOpeningHours(product: ProductItem): number | null {
+  if (typeof product.after_opening_hours === 'number' && product.after_opening_hours > 0) {
+    return product.after_opening_hours;
+  }
+  const clean = product.name.trim().toLowerCase();
+  const matched = ALL_PRESETS.find(
+    (p) =>
+      p.name.toLowerCase() === clean ||
+      p.synonyms?.some((s) => s.toLowerCase() === clean) ||
+      clean.includes(p.name.toLowerCase()) ||
+      p.name.toLowerCase().includes(clean)
+  );
+  return matched?.after_opening_hours ?? null;
 }
 
 export const ProductCard: React.FC<ProductCardProps> = ({
@@ -19,6 +48,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   onDiscard,
   onRestore,
   onDelete,
+  onOpenPackage,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const notifyThreshold = product.notify_before_days ?? 3;
@@ -30,6 +60,8 @@ export const ProductCard: React.FC<ProductCardProps> = ({
 
   const visual = getFoodVisual(product.name, product.category);
   const isArchived = product.status !== 'active';
+  const afterOpeningHours = getProductAfterOpeningHours(product);
+  const canBeOpened = !isArchived && !product.opened_at && Boolean(afterOpeningHours);
 
   // Mindora freshness 3px bar color
   const getProgressColor = () => {
@@ -46,7 +78,12 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   const getDaysStatus = () => {
     if (product.status === 'consumed') return { label: 'Съедено', color: 'text-[#8FA39D]' };
     if (product.status === 'discarded') return { label: 'В утиле', color: 'text-[#8FA39D]' };
-    if (daysLeft < 0) return { label: daysLeft === -1 ? 'Истек вчера' : `Истек ${Math.abs(daysLeft)} дн. назад`, color: 'text-[#EBAEB7]' };
+    if (daysLeft < 0) {
+      return {
+        label: daysLeft === -1 ? 'Истек вчера' : `Истек ${Math.abs(daysLeft)} дн. назад`,
+        color: 'text-[#EBAEB7]',
+      };
+    }
     if (daysLeft === 0) return { label: 'Истекает сегодня', color: 'text-[#EBAEB7] font-semibold' };
     if (daysLeft === 1) return { label: 'Истекает завтра', color: 'text-[#EBAEB7]' };
     if (daysLeft <= notifyThreshold) return { label: `Осталось ${daysLeft} дн.`, color: 'text-[#EBAEB7]' };
@@ -84,6 +121,28 @@ export const ProductCard: React.FC<ProductCardProps> = ({
     onDelete?.(product.id);
   };
 
+  const handleOpenPackage = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    haptic.notification('success');
+
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const hours = afterOpeningHours || 48;
+    const expiryDate = new Date(now.getTime() + hours * 3600 * 1000);
+    const newExpiresAt = expiryDate.toISOString().slice(0, 10);
+
+    // Recalculated expiry should not exceed original shelf life if it was sooner
+    const finalExpiresAt =
+      product.expires_at && new Date(product.expires_at) < expiryDate
+        ? product.expires_at
+        : newExpiresAt;
+
+    onOpenPackage?.(product.id, {
+      opened_at: nowIso,
+      expires_at: finalExpiresAt,
+    });
+  };
+
   return (
     <div
       onClick={handleCardClick}
@@ -92,7 +151,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
       }`}
     >
       <div className="flex items-center gap-3.5">
-        {/* Food Visual Hero (25-35% expressive image/emoji container) */}
+        {/* Food Visual Hero container */}
         <div className="w-14 h-14 shrink-0 rounded-xl backdrop-blur-md bg-white/[0.03] border border-white/[0.06] flex items-center justify-center text-2xl shadow-inner transition-transform group-hover:scale-105">
           <span>{visual.emoji}</span>
         </div>
@@ -124,6 +183,28 @@ export const ProductCard: React.FC<ProductCardProps> = ({
             <span className={`shrink-0 text-[11px] font-mono ${status.color}`}>
               {status.label}
             </span>
+          </div>
+
+          {/* Sub-status: Opened badge or open action chip */}
+          <div className="flex items-center gap-2 pt-0.5">
+            {product.opened_at && !isArchived && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#A7C7E7]/10 border border-[#A7C7E7]/20 text-[10px] font-mono text-[#A7C7E7]">
+                <Clock className="w-3 h-3" />
+                <span>Вскрыто</span>
+              </span>
+            )}
+
+            {canBeOpened && !isExpanded && (
+              <button
+                type="button"
+                onClick={handleOpenPackage}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#5E8B7E]/15 hover:bg-[#5E8B7E]/25 border border-[#5E8B7E]/30 text-[10px] font-medium text-[#8FA39D] hover:text-[#F1F5F4] active:scale-95 transition-all"
+                title={`Вскрыть упаковку (хранение ${afterOpeningHours} ч)`}
+              >
+                <Box className="w-3 h-3 text-[#5E8B7E]" />
+                <span>Вскрыть</span>
+              </button>
+            )}
           </div>
 
           {/* Delicate 3px Freshness Progress Bar (Mindora section 12 style) */}
@@ -178,8 +259,15 @@ export const ProductCard: React.FC<ProductCardProps> = ({
         >
           <div className="space-y-0.5 text-[11px] text-[#8FA39D]">
             <div className="font-mono">Годен до {product.expires_at}</div>
-            {product.created_at && (
-              <div className="text-[10px] text-[#8FA39D]/60">Создан {product.created_at.slice(0, 10)}</div>
+            {product.opened_at && (
+              <div className="text-[10px] text-[#A7C7E7]">
+                Вскрыто: {product.opened_at.slice(0, 10)}
+              </div>
+            )}
+            {product.created_at && !product.opened_at && (
+              <div className="text-[10px] text-[#8FA39D]/60">
+                Создан {product.created_at.slice(0, 10)}
+              </div>
             )}
           </div>
 
@@ -207,6 +295,19 @@ export const ProductCard: React.FC<ProductCardProps> = ({
               </>
             ) : (
               <>
+                {/* Кнопка «Вскрыто» в панели действий */}
+                {canBeOpened && (
+                  <button
+                    type="button"
+                    onClick={handleOpenPackage}
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-[#5E8B7E]/15 hover:bg-[#5E8B7E]/25 text-xs text-[#F1F5F4] border border-[#5E8B7E]/30 active:scale-95 transition-all shadow-xs"
+                    title={`Вскрыть упаковку (срок после вскрытия: ${afterOpeningHours} ч)`}
+                  >
+                    <Box className="w-3.5 h-3.5 text-[#5E8B7E]" />
+                    <span>Вскрыто</span>
+                  </button>
+                )}
+
                 <button
                   type="button"
                   onClick={handleDiscard}

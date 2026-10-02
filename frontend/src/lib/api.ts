@@ -1,4 +1,11 @@
-import type { ApiResponse, FridgeSpace, ProductItem } from '@/types';
+import type {
+  ApiResponse,
+  FridgeSpace,
+  FridgeSummary,
+  InviteResult,
+  ClaimResult,
+  ProductItem,
+} from '@/types';
 
 // Default to relative /api or custom Cloudflare Worker domain from env
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
@@ -14,7 +21,7 @@ export function getTelegramInitData(): string {
 }
 
 /**
- * Base fetch wrapper with Telegram WebApp Authorization header
+ * Base fetch wrapper with Telegram WebApp Authorization headers
  */
 async function request<T>(
   endpoint: string,
@@ -25,7 +32,12 @@ async function request<T>(
 
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
-    ...(initData ? { Authorization: `tma ${initData}` } : {}),
+    ...(initData
+      ? {
+          'X-Telegram-Init-Data': initData,
+          Authorization: `tma ${initData}`,
+        }
+      : {}),
     ...options.headers,
   };
 
@@ -70,7 +82,18 @@ export const api = {
   },
 
   /**
-   * Fetch fridge space and product inventory
+   * Get all fridges accessible to current Telegram user (creates default if none)
+   * GET /api/fridges/my
+   */
+  async getMyFridges(): Promise<ApiResponse<{ fridges: FridgeSummary[] }>> {
+    return request<{ fridges: FridgeSummary[] }>('/fridges/my', {
+      method: 'GET',
+    });
+  },
+
+  /**
+   * Fetch full fridge space details
+   * GET /api/fridges/:id
    */
   async getFridge(fridgeId: string): Promise<ApiResponse<FridgeSpace>> {
     return request<FridgeSpace>(`/fridges/${encodeURIComponent(fridgeId)}`, {
@@ -79,27 +102,45 @@ export const api = {
   },
 
   /**
+   * Fetch product inventory for a specific fridge
+   * GET /api/fridges/:id/products
+   */
+  async getFridgeProducts(fridgeId: string): Promise<ApiResponse<{ products: ProductItem[] }>> {
+    return request<{ products: ProductItem[] }>(
+      `/fridges/${encodeURIComponent(fridgeId)}/products`,
+      {
+        method: 'GET',
+      }
+    );
+  },
+
+  /**
    * Add a product to the fridge
+   * POST /api/fridges/:id/products
    */
   async addProduct(
     fridgeId: string,
     product: Partial<ProductItem>
-  ): Promise<ApiResponse<ProductItem>> {
-    return request<ProductItem>(`/fridges/${encodeURIComponent(fridgeId)}/products`, {
-      method: 'POST',
-      body: JSON.stringify(product),
-    });
+  ): Promise<ApiResponse<{ product: ProductItem }>> {
+    return request<{ product: ProductItem }>(
+      `/fridges/${encodeURIComponent(fridgeId)}/products`,
+      {
+        method: 'POST',
+        body: JSON.stringify(product),
+      }
+    );
   },
 
   /**
-   * Update product (status, quantity, opened_at, etc.)
+   * Update product (status, quantity, opened_at, expires_at, etc.)
+   * PATCH /api/fridges/:id/products/:productId
    */
   async updateProduct(
     fridgeId: string,
     productId: string,
     updates: Partial<ProductItem>
-  ): Promise<ApiResponse<ProductItem>> {
-    return request<ProductItem>(
+  ): Promise<ApiResponse<{ product: ProductItem }>> {
+    return request<{ product: ProductItem }>(
       `/fridges/${encodeURIComponent(fridgeId)}/products/${encodeURIComponent(productId)}`,
       {
         method: 'PATCH',
@@ -109,13 +150,14 @@ export const api = {
   },
 
   /**
-   * Delete product
+   * Soft-delete product
+   * DELETE /api/fridges/:id/products/:productId
    */
   async deleteProduct(
     fridgeId: string,
     productId: string
-  ): Promise<ApiResponse<{ id: string; deleted: boolean }>> {
-    return request<{ id: string; deleted: boolean }>(
+  ): Promise<ApiResponse<{ message: string; id: string }>> {
+    return request<{ message: string; id: string }>(
       `/fridges/${encodeURIComponent(fridgeId)}/products/${encodeURIComponent(productId)}`,
       {
         method: 'DELETE',
@@ -125,21 +167,21 @@ export const api = {
 
   /**
    * Create invitation link for family members
+   * POST /api/fridges/:id/invites
    */
-  async createInvite(fridgeId: string): Promise<ApiResponse<{ invite_code: string; expires_at: string }>> {
-    return request<{ invite_code: string; expires_at: string }>('/invites/create', {
+  async createInvite(fridgeId: string): Promise<ApiResponse<InviteResult>> {
+    return request<InviteResult>(`/fridges/${encodeURIComponent(fridgeId)}/invites`, {
       method: 'POST',
-      body: JSON.stringify({ fridge_id: fridgeId }),
     });
   },
 
   /**
    * Claim invitation code and join fridge
+   * POST /api/invites/:code/claim
    */
-  async claimInvite(code: string): Promise<ApiResponse<{ fridge_id: string }>> {
-    return request<{ fridge_id: string }>('/invites/claim', {
+  async claimInvite(code: string): Promise<ApiResponse<ClaimResult>> {
+    return request<ClaimResult>(`/invites/${encodeURIComponent(code)}/claim`, {
       method: 'POST',
-      body: JSON.stringify({ code }),
     });
   },
 };

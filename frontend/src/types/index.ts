@@ -4,6 +4,7 @@ export type ProductStatus = 'active' | 'consumed' | 'discarded';
 
 export interface ProductItem {
   id: string;
+  fridge_id?: string;
   name: string;
   category: string;
   storage_type: StorageType;
@@ -14,8 +15,10 @@ export interface ProductItem {
   notify_before_days: number;
   status: ProductStatus;
   added_by: number;
+  after_opening_hours?: number | null;
   created_at?: string;
   updated_at: string;
+  deleted_at?: string | null;
 }
 
 export interface UserProfile {
@@ -25,6 +28,14 @@ export interface UserProfile {
   username?: string;
   language_code?: string;
   is_premium?: boolean;
+}
+
+export interface FridgeSummary {
+  id: string;
+  name: string;
+  role: 'owner' | 'member';
+  created_at: string;
+  updated_at: string;
 }
 
 export interface FridgeSpace {
@@ -37,9 +48,20 @@ export interface FridgeSpace {
   updated_at: string;
 }
 
+export interface InviteResult {
+  code: string;
+  invite_code: string;
+  expires_at: string;
+}
+
+export interface ClaimResult {
+  fridge_id: string;
+}
+
 export interface ApiResponse<T> {
   success: boolean;
   data?: T;
   error?: string;
   code?: string;
 }
+

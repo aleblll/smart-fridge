@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { TelegramProvider } from '@/context/TelegramContext';
 import { useTelegramWebApp } from '@/hooks/useTelegramWebApp';
 import { AddProductDrawer } from '@/components/AddProductDrawer';
@@ -8,10 +8,21 @@ import { CookRecipeModal } from '@/components/CookRecipeModal';
 import { ShareModal } from '@/components/ShareModal';
 import { DiagnosticsDrawer } from '@/components/DiagnosticsDrawer';
 import { storage } from '@/lib/storage';
+import { api } from '@/lib/api';
 import { logger } from '@/lib/logger';
 import { calculateFreshnessMetrics } from '@/lib/freshness';
-import type { ProductItem, StorageType, ProductStatus } from '@/types';
-import { Plus, Users, Search, Sparkles, Snowflake, Archive, Refrigerator } from 'lucide-react';
+import type { ProductItem, StorageType, ProductStatus, FridgeSummary } from '@/types';
+import {
+  Plus,
+  Users,
+  Search,
+  Sparkles,
+  Snowflake,
+  Archive,
+  Refrigerator,
+  CheckCircle2,
+  ChevronDown,
+} from 'lucide-react';
 
 const CATEGORIES = [
   'Все',
@@ -40,6 +51,7 @@ const INITIAL_DEMO_PRODUCTS: ProductItem[] = [
     notify_before_days: 2,
     status: 'active',
     added_by: 100,
+    after_opening_hours: 48,
     created_at: new Date(Date.now() - 3 * 86400000).toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -55,6 +67,7 @@ const INITIAL_DEMO_PRODUCTS: ProductItem[] = [
     notify_before_days: 3,
     status: 'active',
     added_by: 100,
+    after_opening_hours: 120,
     created_at: new Date(Date.now() - 1 * 86400000).toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -86,11 +99,35 @@ function MainScreen() {
   const [activeZone, setActiveZone] = useState<StorageType | 'all'>('all');
   const [selectedCategory, setSelectedCategory] = useState<string>('Все');
   const [searchQuery, setSearchQuery] = useState<string>('');
+
+  // Fridge Management
+  const [fridges, setFridges] = useState<FridgeSummary[]>(() => {
+    return storage.getCachedFridges() || [];
+  });
+  const [activeFridgeId, setActiveFridgeId] = useState<string>(() => {
+    return storage.getActiveFridgeId() || '';
+  });
+  const [fridgeSelectorOpen, setFridgeSelectorOpen] = useState(false);
+
+  // Toast Notification
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = useCallback((msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 3500);
+  }, []);
+
+  // Products state initialized from local cache
   const [products, setProducts] = useState<ProductItem[]>(() => {
-    const cached = storage.getInitialProducts();
+    const cached = storage.getInitialProducts(storage.getActiveFridgeId() || undefined);
     return cached !== null ? cached : INITIAL_DEMO_PRODUCTS;
   });
-  const [isLoaded, setIsLoaded] = useState(false);
+
+  const activeFridge = useMemo(() => {
+    return fridges.find((f) => f.id === activeFridgeId) || fridges[0] || null;
+  }, [fridges, activeFridgeId]);
 
   // Hidden Easter Egg: Triple-tap or long-press on header title to open diagnostics
   const tapCountRef = useRef(0);
@@ -126,47 +163,131 @@ function MainScreen() {
     }
   };
 
-  // Load products on start from Telegram CloudStorage / localStorage
+  // App Initialization:
+  // 1. Process Telegram start_param invite code
+  // 2. Sync fridges list from D1
+  // 3. Load active fridge products (Thin Client + Offline Cache)
   useEffect(() => {
-    storage.loadProducts().then((loaded) => {
-      if (loaded !== null) {
-        setProducts(loaded);
-      } else {
-        setProducts(INITIAL_DEMO_PRODUCTS);
-        storage.saveProducts(INITIAL_DEMO_PRODUCTS);
-      }
-      setIsLoaded(true);
-    });
-  }, []);
+    let isCancelled = false;
 
-  // Save products on every change
-  useEffect(() => {
-    if (isLoaded) {
-      storage.saveProducts(products);
+    async function initializeApp() {
+      // 1. Check for invite code in Telegram start_param
+      const startParam = window.Telegram?.WebApp?.initDataUnsafe?.start_param;
+      if (startParam) {
+        const inviteCode = startParam.replace(/^fridge_/, '').trim();
+        if (inviteCode) {
+          logger.info('INVITE', `Claiming invite code from start_param: ${inviteCode}`);
+          try {
+            const claimRes = await api.claimInvite(inviteCode);
+            if (!isCancelled && claimRes.success && claimRes.data?.fridge_id) {
+              const joinedFridgeId = claimRes.data.fridge_id;
+              storage.setActiveFridgeId(joinedFridgeId);
+              setActiveFridgeId(joinedFridgeId);
+              haptic.notification('success');
+              showToast('Вы успешно присоединились к семейному холодильнику!');
+            }
+          } catch (e) {
+            logger.warn('INVITE', `Failed to claim invite: ${e instanceof Error ? e.message : String(e)}`);
+          }
+        }
+      }
+
+      // 2. Synchronize fridges list
+      try {
+        const syncedFridges = await storage.syncFridges();
+        if (!isCancelled && syncedFridges.length > 0) {
+          setFridges(syncedFridges);
+          const currentActive = storage.getActiveFridgeId();
+          const targetFridgeId =
+            syncedFridges.find((f) => f.id === currentActive)?.id || syncedFridges[0].id;
+          storage.setActiveFridgeId(targetFridgeId);
+          setActiveFridgeId(targetFridgeId);
+        }
+      } catch (e) {
+        logger.warn('STORAGE', `Failed syncing fridges: ${e instanceof Error ? e.message : String(e)}`);
+      }
     }
-  }, [products, isLoaded]);
+
+    initializeApp();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [haptic, showToast]);
+
+  // Load products when activeFridgeId changes
+  useEffect(() => {
+    if (!activeFridgeId) return;
+
+    // 1. Instant render from local cache
+    const cached = storage.getInitialProducts(activeFridgeId);
+    if (cached !== null) {
+      setProducts(cached);
+    }
+
+    // 2. Background sync to D1 server
+    storage.loadProducts(activeFridgeId, (serverProducts) => {
+      setProducts(serverProducts);
+    });
+  }, [activeFridgeId]);
+
+  // Handle switching active fridge
+  const handleSelectFridge = (fridgeId: string) => {
+    haptic.selection();
+    storage.setActiveFridgeId(fridgeId);
+    setActiveFridgeId(fridgeId);
+    setFridgeSelectorOpen(false);
+  };
 
   // Handle adding new product
-  const handleAddProduct = (newProductData: Omit<ProductItem, 'id' | 'added_by' | 'updated_at'>) => {
+  const handleAddProduct = async (
+    newProductData: Omit<ProductItem, 'id' | 'added_by' | 'updated_at'>
+  ) => {
     const newProduct: ProductItem = {
       ...newProductData,
       id: `prod-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      fridge_id: activeFridgeId || undefined,
       added_by: user?.id || 1,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
 
     setProducts((prev) => [newProduct, ...prev]);
+
+    if (activeFridgeId) {
+      await storage.addProduct(activeFridgeId, newProduct);
+    }
   };
 
   // Change status (consume / discard / restore)
-  const setProductStatus = (id: string, newStatus: ProductStatus) => {
+  const setProductStatus = async (id: string, newStatus: ProductStatus) => {
     setProducts((prev) =>
       prev.map((p) =>
         p.id === id ? { ...p, status: newStatus, updated_at: new Date().toISOString() } : p
       )
     );
+
+    if (activeFridgeId) {
+      await storage.updateProduct(activeFridgeId, id, { status: newStatus });
+    }
     logger.info('INVENTORY', `Item ${id} status changed to ${newStatus}`);
+  };
+
+  // Handle opening product packaging («Вскрыто»)
+  const handleOpenPackage = async (
+    id: string,
+    updates: { opened_at: string; expires_at: string }
+  ) => {
+    setProducts((prev) =>
+      prev.map((p) =>
+        p.id === id ? { ...p, ...updates, updated_at: new Date().toISOString() } : p
+      )
+    );
+
+    if (activeFridgeId) {
+      await storage.updateProduct(activeFridgeId, id, updates);
+    }
+    logger.info('INVENTORY', `Item ${id} package opened, new expiry: ${updates.expires_at}`);
   };
 
   // Handle cooking recipe: open recipe modal
@@ -176,7 +297,7 @@ function MainScreen() {
   };
 
   // Handle consuming recipe ingredients
-  const handleConsumeRecipeIngredients = (productIds: string[]) => {
+  const handleConsumeRecipeIngredients = async (productIds: string[]) => {
     setProducts((prev) =>
       prev.map((p) =>
         productIds.includes(p.id)
@@ -185,16 +306,25 @@ function MainScreen() {
       )
     );
     setCookModalOpen(false);
+
+    if (activeFridgeId) {
+      for (const pid of productIds) {
+        storage.updateProduct(activeFridgeId, pid, { status: 'consumed' }).catch(() => {});
+      }
+    }
     logger.info('COOKING', `Consumed ${productIds.length} ingredients for recipe "${cookingRecipe?.title}"`);
   };
 
   // Permanently delete product
-  const handleDeleteProduct = (id: string) => {
+  const handleDeleteProduct = async (id: string) => {
     setProducts((prev) => prev.filter((p) => p.id !== id));
+    if (activeFridgeId) {
+      await storage.deleteProduct(activeFridgeId, id);
+    }
     logger.info('INVENTORY', `Item ${id} permanently removed`);
   };
 
-  // Count items and freshness balance with unified calculateFreshnessMetrics
+  // Count items and freshness balance with calculateFreshnessMetrics
   const counts = useMemo(() => {
     let active = 0;
     let expiringSoon = 0;
@@ -264,6 +394,16 @@ function MainScreen() {
 
   return (
     <div className="min-h-screen text-[#F1F5F4] px-4 py-5 max-w-md mx-auto space-y-4 pb-28">
+      {/* Floating Toast Notification */}
+      {toastMessage && (
+        <div className="fixed top-4 left-4 right-4 z-50 flex items-center justify-center pointer-events-none animate-fadeIn">
+          <div className="rounded-2xl backdrop-blur-2xl bg-[#121615]/95 border border-[#5E8B7E]/40 px-4 py-3 shadow-[0_12px_32px_rgba(0,0,0,0.5)] flex items-center gap-2.5 text-xs text-[#F1F5F4]">
+            <CheckCircle2 className="w-4 h-4 text-[#5E8B7E] shrink-0" />
+            <span className="font-medium">{toastMessage}</span>
+          </div>
+        </div>
+      )}
+
       {/* 1. HERO-БЛОК СВЕЖЕСТИ (Mindora Calming Wellness Frosted Glass) */}
       <header className="rounded-2xl backdrop-blur-xl bg-white/[0.04] border border-white/[0.08] shadow-[inset_0_1px_1px_rgba(255,255,255,0.08),0_12px_32px_rgba(0,0,0,0.25)] p-4 space-y-3">
         <div className="flex items-center justify-between">
@@ -277,15 +417,54 @@ function MainScreen() {
             className="flex items-center gap-2 cursor-pointer select-none active:opacity-85 transition-opacity"
             title="Свежесть"
           >
-            <h1 className="text-xl font-semibold tracking-tight text-[#F1F5F4]">
-              Свежесть
-            </h1>
+            <h1 className="text-xl font-semibold tracking-tight text-[#F1F5F4]">Свежесть</h1>
             <span className="text-xs font-medium text-[#8FA39D] font-mono">
               • {counts.active} {counts.active === 1 ? 'продукт' : counts.active < 5 ? 'продукта' : 'продуктов'}
             </span>
           </div>
 
           <div className="flex items-center gap-1.5">
+            {/* Multiple fridges selector or fridge badge */}
+            {fridges.length > 1 && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    haptic.impact('light');
+                    setFridgeSelectorOpen((prev) => !prev);
+                  }}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl backdrop-blur-md bg-white/[0.05] border border-white/[0.06] text-xs text-[#8FA39D] hover:text-[#F1F5F4] active:scale-95 transition-all shadow-xs"
+                >
+                  <span className="truncate max-w-[90px]">{activeFridge?.name || 'Холодильник'}</span>
+                  <ChevronDown className="w-3 h-3 shrink-0" />
+                </button>
+
+                {fridgeSelectorOpen && (
+                  <div className="absolute right-0 top-full mt-1.5 w-48 rounded-2xl backdrop-blur-2xl bg-[#121615]/95 border border-white/[0.08] shadow-2xl p-1.5 z-40 space-y-0.5 animate-fadeIn">
+                    {fridges.map((f) => (
+                      <button
+                        key={f.id}
+                        type="button"
+                        onClick={() => handleSelectFridge(f.id)}
+                        className={`w-full text-left px-3 py-2 rounded-xl text-xs flex items-center justify-between transition-all ${
+                          f.id === activeFridgeId
+                            ? 'bg-[#5E8B7E]/20 text-[#F1F5F4] font-medium'
+                            : 'text-[#8FA39D] hover:bg-white/[0.04] hover:text-[#F1F5F4]'
+                        }`}
+                      >
+                        <span className="truncate">{f.name}</span>
+                        {f.role === 'owner' ? (
+                          <span className="text-[10px] text-[#5E8B7E] font-mono">Владелец</span>
+                        ) : (
+                          <span className="text-[10px] text-[#A7C7E7] font-mono">Семья</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             <button
               type="button"
               onClick={() => {
@@ -293,6 +472,7 @@ function MainScreen() {
                 setShareModalOpen(true);
               }}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl backdrop-blur-md bg-white/[0.05] border border-white/[0.06] text-xs font-medium text-[#F1F5F4] hover:bg-white/[0.08] active:scale-95 transition-all shadow-xs"
+              title="Семейный доступ"
             >
               <Users className="w-3.5 h-3.5 text-[#5E8B7E]" />
               <span>Семья</span>
@@ -474,6 +654,7 @@ function MainScreen() {
               onDiscard={() => setProductStatus(product.id, 'discarded')}
               onRestore={() => setProductStatus(product.id, 'active')}
               onDelete={handleDeleteProduct}
+              onOpenPackage={handleOpenPackage}
             />
           ))
         )}
@@ -489,7 +670,7 @@ function MainScreen() {
           }}
           className="inline-flex items-center gap-1.5 text-[11px] font-mono text-[#8FA39D]/40 hover:text-[#8FA39D] active:scale-95 transition-all"
         >
-          <span>Свежесть v1.0 • Сборка 2026.10</span>
+          <span>Свежесть v1.0 • D1 Connected</span>
         </button>
       </footer>
 
@@ -529,14 +710,12 @@ function MainScreen() {
       <ShareModal
         open={shareModalOpen}
         onClose={() => setShareModalOpen(false)}
-        userId={user?.id}
+        activeFridgeId={activeFridge?.id}
+        fridgeName={activeFridge?.name}
       />
 
       {/* Diagnostics / Logs Drawer */}
-      <DiagnosticsDrawer
-        open={diagOpen}
-        onOpenChange={setDiagOpen}
-      />
+      <DiagnosticsDrawer open={diagOpen} onOpenChange={setDiagOpen} />
     </div>
   );
 }
