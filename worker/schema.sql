@@ -48,7 +48,16 @@ CREATE TABLE IF NOT EXISTS invites (
   created_at TEXT NOT NULL
 );
 
+-- 5. User Notifications Table (Idempotency for daily digests)
+CREATE TABLE IF NOT EXISTS user_notifications (
+  user_id INTEGER PRIMARY KEY,
+  last_digest_date TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 -- Indices for high-frequency queries
 CREATE INDEX IF NOT EXISTS idx_products_fridge ON products(fridge_id);
 CREATE INDEX IF NOT EXISTS idx_products_expires ON products(expires_at);
 CREATE INDEX IF NOT EXISTS idx_members_user ON fridge_members(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_notifications_date ON user_notifications(last_digest_date);
+

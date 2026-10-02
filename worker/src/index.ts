@@ -67,6 +67,65 @@ export interface VerifyAuthResult {
   error?: 'MISSING_INIT_DATA' | 'AUTH_EXPIRED' | 'INVALID_SIGNATURE' | 'MALFORMED_DATA';
 }
 
+export interface ScheduledEvent {
+  cron: string;
+  scheduledTime: number;
+  type: string;
+  noRetry?: () => void;
+}
+
+export interface ExecutionContext {
+  waitUntil(promise: Promise<any>): void;
+  passThroughOnException(): void;
+}
+
+export interface ExpiringProductRow {
+  id: string;
+  fridge_id: string;
+  name: string;
+  category: string;
+  storage_type: string;
+  quantity: number;
+  unit: string;
+  expires_at: string;
+  notify_before_days: number;
+  fridge_name: string;
+  user_id: number;
+  last_digest_date?: string | null;
+}
+
+export interface ExpiringProductItem {
+  id: string;
+  name: string;
+  quantity: number;
+  unit: string;
+  expires_at: string;
+  fridge_name: string;
+  daysDiff: number;
+}
+
+export interface UserDigest {
+  userId: number;
+  items: ExpiringProductItem[];
+  fridgeNames: string[];
+}
+
+export interface NotificationStats {
+  total: number;
+  sent: number;
+  blocked: number;
+  failed: number;
+  skipped: number;
+}
+
+export interface TelegramSendResult {
+  success: boolean;
+  messageId?: number;
+  userId: number;
+  blocked?: boolean;
+  error?: string;
+}
+
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS fridges (
   id TEXT PRIMARY KEY,
@@ -111,9 +170,16 @@ CREATE TABLE IF NOT EXISTS invites (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS user_notifications (
+  user_id INTEGER PRIMARY KEY,
+  last_digest_date TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_products_fridge ON products(fridge_id);
 CREATE INDEX IF NOT EXISTS idx_products_expires ON products(expires_at);
 CREATE INDEX IF NOT EXISTS idx_members_user ON fridge_members(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_notifications_date ON user_notifications(last_digest_date);
 `;
 
 // In-memory rate limiting store: key -> timestamps array
@@ -411,6 +477,423 @@ function jsonResponse(data: any, status = 200, cors: Record<string, string> = {}
       ...extraHeaders,
     },
   });
+}
+
+// ==========================================
+// Morning Notification Digest Functions (TASK-005 & Phase 4)
+// ==========================================
+
+export function escapeHtml(str: any): string {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+export function getDaysUntilExpiry(expiresAtStr: string, referenceDate: Date = new Date()): number {
+  const [year, month, day] = expiresAtStr.split('-').map(Number);
+  const expiryDate = new Date(Date.UTC(year, month - 1, day));
+
+  const refUTC = new Date(Date.UTC(
+    referenceDate.getUTCFullYear(),
+    referenceDate.getUTCMonth(),
+    referenceDate.getUTCDate()
+  ));
+
+  const diffMs = expiryDate.getTime() - refUTC.getTime();
+  return Math.round(diffMs / (1000 * 60 * 60 * 24));
+}
+
+export function formatMoreProducts(count: number): string {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod100 >= 11 && mod100 <= 19) {
+    return `и еще ${count} продуктов`;
+  }
+  if (mod10 === 1) {
+    return `и еще ${count} продукт`;
+  }
+  if (mod10 >= 2 && mod10 <= 4) {
+    return `и еще ${count} продукта`;
+  }
+  return `и еще ${count} продуктов`;
+}
+
+export function formatDigestHtml(
+  userDigest: UserDigest,
+  appUrl = 'https://aleblll.github.io/smart-fridge/'
+): { html: string; replyMarkup: any } {
+  const lines: string[] = ['<b>❄️ Умный холодильник: утренний дайджест</b>', ''];
+
+  // Sort items by urgency (daysDiff ASC)
+  const sortedItems = [...userDigest.items].sort((a, b) => a.daysDiff - b.daysDiff);
+  const totalCount = sortedItems.length;
+  const displayedItems = sortedItems.slice(0, 10);
+  const remainingCount = totalCount - displayedItems.length;
+
+  const expiredOrToday = displayedItems.filter(item => item.daysDiff <= 0);
+  const tomorrow = displayedItems.filter(item => item.daysDiff === 1);
+  const soon = displayedItems.filter(item => item.daysDiff > 1);
+
+  if (expiredOrToday.length > 0) {
+    lines.push('🔴 <b>Истекает сегодня / просрочено:</b>');
+    for (const item of expiredOrToday) {
+      const isExpired = item.daysDiff < 0;
+      const statusSuffix = isExpired ? ` (просрочено на ${Math.abs(item.daysDiff)} дн.)` : ' (сегодня)';
+      lines.push(`• <b>${escapeHtml(item.name)}</b> — ${item.quantity} ${escapeHtml(item.unit)}${statusSuffix}`);
+    }
+    lines.push('');
+  }
+
+  if (tomorrow.length > 0) {
+    lines.push('🟡 <b>Истекает завтра:</b>');
+    for (const item of tomorrow) {
+      lines.push(`• <b>${escapeHtml(item.name)}</b> — ${item.quantity} ${escapeHtml(item.unit)}`);
+    }
+    lines.push('');
+  }
+
+  if (soon.length > 0) {
+    lines.push('🟠 <b>Истекает в ближайшие дни:</b>');
+    for (const item of soon) {
+      lines.push(`• ${escapeHtml(item.name)} (${item.quantity} ${escapeHtml(item.unit)}) — до ${item.expires_at}`);
+    }
+    lines.push('');
+  }
+
+  if (remainingCount > 0) {
+    lines.push(`<i>...${formatMoreProducts(remainingCount)}</i>`);
+    lines.push('');
+  }
+
+  lines.push('<i>💡 Проверьте запасы и используйте продукты вовремя!</i>');
+
+  const replyMarkup = {
+    inline_keyboard: [
+      [
+        {
+          text: 'Открыть Холодильник 🌿',
+          web_app: { url: appUrl }
+        }
+      ]
+    ]
+  };
+
+  return {
+    html: lines.join('\n'),
+    replyMarkup
+  };
+}
+
+export class RateLimiter {
+  private minIntervalMs: number;
+  public lastRequestTime: number;
+
+  constructor(maxPerSecond = 25) {
+    this.minIntervalMs = Math.ceil(1000 / maxPerSecond);
+    this.lastRequestTime = 0;
+  }
+
+  async throttle(sleepFn: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms))): Promise<void> {
+    const now = Date.now();
+    const elapsed = now - this.lastRequestTime;
+    if (elapsed < this.minIntervalMs) {
+      const waitMs = this.minIntervalMs - elapsed;
+      await sleepFn(waitMs);
+    }
+    this.lastRequestTime = Date.now();
+  }
+}
+
+export async function sendTelegramMessage({
+  botToken,
+  chatId,
+  html,
+  replyMarkup,
+  fetchFn = fetch,
+  sleepFn = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  maxRetries = 3
+}: {
+  botToken: string;
+  chatId: number;
+  html: string;
+  replyMarkup?: any;
+  fetchFn?: typeof fetch;
+  sleepFn?: (ms: number) => Promise<void>;
+  maxRetries?: number;
+}): Promise<TelegramSendResult> {
+  const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
+  const body = {
+    chat_id: chatId,
+    text: html,
+    parse_mode: 'HTML',
+    reply_markup: replyMarkup
+  };
+
+  let attempt = 0;
+
+  while (attempt <= maxRetries) {
+    attempt++;
+    try {
+      const response = await fetchFn(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+
+      // Handle 429 Too Many Requests
+      if (response.status === 429) {
+        const errorData = await response.json().catch(() => ({})) as any;
+        const retryAfterSec = errorData?.parameters?.retry_after || Math.pow(2, attempt);
+        console.warn(`[Telegram API] 429 Rate Limit for chat ${chatId}. Retrying after ${retryAfterSec}s...`);
+        await sleepFn((retryAfterSec * 1000) + 100);
+        continue;
+      }
+
+      // Handle 403 Forbidden (Bot blocked or deactivated) or 400 (chat not found)
+      if (response.status === 403 || response.status === 400) {
+        const errorData = await response.json().catch(() => ({})) as any;
+        const description = errorData?.description || '';
+        if (
+          response.status === 403 ||
+          description.includes('bot was blocked by the user') ||
+          description.includes('user is deactivated') ||
+          description.includes('chat not found')
+        ) {
+          console.warn(`[Telegram API] User ${chatId} blocked the bot or chat unavailable: ${description || 'Forbidden'}`);
+          return { success: false, blocked: true, userId: chatId, error: description || 'Forbidden' };
+        }
+      }
+
+      if (!response.ok) {
+        const errText = await response.text().catch(() => '');
+        throw new Error(`Telegram API HTTP ${response.status}: ${errText}`);
+      }
+
+      const data = await response.json() as any;
+      return { success: true, messageId: data?.result?.message_id, userId: chatId };
+    } catch (err: any) {
+      if (attempt > maxRetries) {
+        console.error(`[Telegram API] Failed to send to chat ${chatId} after ${maxRetries} attempts:`, err.message);
+        return { success: false, error: err.message, userId: chatId };
+      }
+      await sleepFn(500 * attempt);
+    }
+  }
+
+  return { success: false, error: 'Max retries exceeded', userId: chatId };
+}
+
+export async function runDailyDigestNotifications(
+  env: Env,
+  options?: {
+    referenceDate?: Date | string;
+    fetchFn?: typeof fetch;
+    sleepFn?: (ms: number) => Promise<void>;
+    appUrl?: string;
+  }
+): Promise<NotificationStats> {
+  const botToken = env.TELEGRAM_BOT_TOKEN;
+  if (!botToken) {
+    console.warn('⚠️ [Worker Cron] TELEGRAM_BOT_TOKEN is not configured. Skipping notifications.');
+    return { total: 0, sent: 0, blocked: 0, failed: 0, skipped: 0 };
+  }
+
+  const db = getDb(env);
+  const fetchFn = options?.fetchFn || fetch;
+  const sleepFn = options?.sleepFn || ((ms: number) => new Promise(resolve => setTimeout(resolve, ms)));
+  const appUrl = options?.appUrl || 'https://aleblll.github.io/smart-fridge/';
+
+  const refDate = options?.referenceDate
+    ? (options.referenceDate instanceof Date ? options.referenceDate : new Date(options.referenceDate))
+    : new Date();
+  const todayStr = refDate.toISOString().slice(0, 10);
+
+  // Ensure user_notifications table exists
+  try {
+    await db.prepare(`
+      CREATE TABLE IF NOT EXISTS user_notifications (
+        user_id INTEGER PRIMARY KEY,
+        last_digest_date TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    `).run();
+  } catch {}
+
+  // D1 query: select active products expiring on or before now + notify_before_days
+  // Joined with fridges and fridge_members to get recipient user_id and last_digest_date
+  let query: string;
+  let params: any[];
+
+  if (options?.referenceDate) {
+    query = `
+      SELECT
+        p.id,
+        p.fridge_id,
+        p.name,
+        p.category,
+        p.storage_type,
+        p.quantity,
+        p.unit,
+        p.expires_at,
+        p.notify_before_days,
+        f.name AS fridge_name,
+        m.user_id,
+        un.last_digest_date
+      FROM products p
+      JOIN fridges f ON p.fridge_id = f.id
+      JOIN fridge_members m ON f.id = m.fridge_id
+      LEFT JOIN user_notifications un ON m.user_id = un.user_id
+      WHERE p.status = 'active'
+        AND p.deleted_at IS NULL
+        AND p.expires_at <= date(?, '+' || p.notify_before_days || ' days')
+      ORDER BY m.user_id ASC, p.expires_at ASC, p.name ASC
+    `;
+    params = [todayStr];
+  } else {
+    query = `
+      SELECT
+        p.id,
+        p.fridge_id,
+        p.name,
+        p.category,
+        p.storage_type,
+        p.quantity,
+        p.unit,
+        p.expires_at,
+        p.notify_before_days,
+        f.name AS fridge_name,
+        m.user_id,
+        un.last_digest_date
+      FROM products p
+      JOIN fridges f ON p.fridge_id = f.id
+      JOIN fridge_members m ON f.id = m.fridge_id
+      LEFT JOIN user_notifications un ON m.user_id = un.user_id
+      WHERE p.status = 'active'
+        AND p.deleted_at IS NULL
+        AND p.expires_at <= date('now', '+' || p.notify_before_days || ' days')
+      ORDER BY m.user_id ASC, p.expires_at ASC, p.name ASC
+    `;
+    params = [];
+  }
+
+  const stmt = params.length > 0 ? db.prepare(query).bind(...params) : db.prepare(query);
+  const rowsRes = await stmt.all<ExpiringProductRow>();
+  const rows = rowsRes.results || [];
+
+  // Group by user_id with idempotency check
+  const userDigestsMap = new Map<number, { items: ExpiringProductItem[]; fridgeNames: Set<string> }>();
+  let skippedCount = 0;
+  const skippedUsers = new Set<number>();
+
+  for (const row of rows) {
+    const userId = Number(row.user_id);
+    if (!userId) continue;
+
+    // Idempotency: check if user already received digest today
+    if (row.last_digest_date === todayStr) {
+      if (!skippedUsers.has(userId)) {
+        skippedUsers.add(userId);
+        skippedCount++;
+      }
+      continue;
+    }
+
+    const daysDiff = getDaysUntilExpiry(row.expires_at, refDate);
+    const notifyBefore = typeof row.notify_before_days === 'number' ? row.notify_before_days : 2;
+
+    // Filter to ensure it falls within notify window or already expired
+    if (daysDiff <= notifyBefore) {
+      if (!userDigestsMap.has(userId)) {
+        userDigestsMap.set(userId, {
+          items: [],
+          fridgeNames: new Set()
+        });
+      }
+
+      const userGroup = userDigestsMap.get(userId)!;
+      userGroup.fridgeNames.add(row.fridge_name || 'Мой холодильник');
+      userGroup.items.push({
+        id: row.id,
+        name: row.name || 'Без названия',
+        quantity: row.quantity ?? 1,
+        unit: row.unit || 'pcs',
+        expires_at: row.expires_at,
+        fridge_name: row.fridge_name,
+        daysDiff
+      });
+    }
+  }
+
+  // Anti-spam: filter out users with 0 expiring items
+  const userDigests: UserDigest[] = [];
+  for (const [userId, group] of userDigestsMap.entries()) {
+    if (group.items.length > 0) {
+      userDigests.push({
+        userId,
+        items: group.items,
+        fridgeNames: Array.from(group.fridgeNames)
+      });
+    }
+  }
+
+  if (userDigests.length === 0) {
+    console.log('✨ [Worker Cron] No users require notification today.');
+    return { total: 0, sent: 0, blocked: 0, failed: 0, skipped: skippedCount };
+  }
+
+  const rateLimiter = new RateLimiter(25);
+  let sentCount = 0;
+  let blockedCount = 0;
+  let failedCount = 0;
+
+  for (const digest of userDigests) {
+    await rateLimiter.throttle(sleepFn);
+
+    const { html, replyMarkup } = formatDigestHtml(digest, appUrl);
+    const result = await sendTelegramMessage({
+      botToken,
+      chatId: digest.userId,
+      html,
+      replyMarkup,
+      fetchFn,
+      sleepFn
+    });
+
+    const nowIso = new Date().toISOString();
+
+    if (result.success) {
+      sentCount++;
+      // Record idempotency to prevent duplicate sends on same day
+      await db.prepare(`
+        INSERT INTO user_notifications (user_id, last_digest_date, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET last_digest_date = excluded.last_digest_date, updated_at = excluded.updated_at
+      `).bind(digest.userId, todayStr, nowIso).run();
+    } else if (result.blocked) {
+      blockedCount++;
+      // Mark as processed today so we don't repeatedly hit Telegram for blocked users
+      await db.prepare(`
+        INSERT INTO user_notifications (user_id, last_digest_date, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET last_digest_date = excluded.last_digest_date, updated_at = excluded.updated_at
+      `).bind(digest.userId, todayStr, nowIso).run();
+    } else {
+      failedCount++;
+    }
+  }
+
+  console.log(`📊 [Worker Cron] Notification sequence completed: sent=${sentCount}, blocked=${blockedCount}, failed=${failedCount}, skipped=${skippedCount}`);
+
+  return {
+    total: userDigests.length,
+    sent: sentCount,
+    blocked: blockedCount,
+    failed: failedCount,
+    skipped: skippedCount
+  };
 }
 
 export default {
@@ -963,5 +1446,15 @@ export default {
 
     // Default 404
     return jsonResponse({ error: 'Not Found', path: url.pathname }, 404, corsHeaders);
+  },
+
+  async scheduled(event: ScheduledEvent, env: Env, ctx?: ExecutionContext): Promise<void> {
+    console.log(`⏰ [Worker Cron] Scheduled event triggered: cron=${event?.cron}, scheduledTime=${event?.scheduledTime}`);
+    const promise = runDailyDigestNotifications(env);
+    if (ctx?.waitUntil) {
+      ctx.waitUntil(promise);
+    }
+    await promise;
   }
 };
+

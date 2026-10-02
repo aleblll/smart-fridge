@@ -17,3 +17,7 @@ binding = "DB"
 database_name = "smart-fridge-db"
 database_id = "smart-fridge-d1-id"
 
+[triggers]
+crons = ["0 6 * * *"] # 06:00 UTC = 09:00 MSK ежедневно (или каждые 30 минут)
+
+
