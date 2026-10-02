@@ -1,0 +1,17 @@
+{
+  "name": "smart-fridge-monorepo",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "frontend",
+    "worker"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "lint": "npm run lint --workspace=frontend",
+    "build": "npm run build --workspace=frontend"
+  },
+  "devDependencies": {
+    "vitest": "^3.0.0"
+  }
+}

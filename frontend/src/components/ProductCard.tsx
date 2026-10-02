@@ -21,9 +21,11 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   onDelete,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
+  const notifyThreshold = product.notify_before_days ?? 3;
   const { daysLeft, spentPercent, statusTag } = calculateFreshnessMetrics(
     product.expires_at,
-    product.created_at
+    product.created_at,
+    notifyThreshold
   );
 
   const visual = getFoodVisual(product.name, product.category);
@@ -33,9 +35,8 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   const getProgressColor = () => {
     switch (statusTag) {
       case 'expired':
-        return 'bg-[#EBAEB7]'; // Soft Coral warning
       case 'expiring':
-        return 'bg-[#EBAEB7]'; // Coral for expiring soon
+        return 'bg-[#EBAEB7]'; // Soft Coral warning
       case 'fresh':
       default:
         return 'bg-[#5E8B7E]'; // Sage for fresh
@@ -45,10 +46,10 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   const getDaysStatus = () => {
     if (product.status === 'consumed') return { label: 'Съедено', color: 'text-[#8FA39D]' };
     if (product.status === 'discarded') return { label: 'В утиле', color: 'text-[#8FA39D]' };
-    if (daysLeft < 0) return { label: `Истек ${Math.abs(daysLeft)} дн. назад`, color: 'text-[#EBAEB7]' };
+    if (daysLeft < 0) return { label: daysLeft === -1 ? 'Истек вчера' : `Истек ${Math.abs(daysLeft)} дн. назад`, color: 'text-[#EBAEB7]' };
     if (daysLeft === 0) return { label: 'Истекает сегодня', color: 'text-[#EBAEB7] font-semibold' };
     if (daysLeft === 1) return { label: 'Истекает завтра', color: 'text-[#EBAEB7]' };
-    if (daysLeft <= 3) return { label: `Осталось ${daysLeft} дня`, color: 'text-[#EBAEB7]' };
+    if (daysLeft <= notifyThreshold) return { label: `Осталось ${daysLeft} дн.`, color: 'text-[#EBAEB7]' };
     return { label: `Осталось ${daysLeft} дн.`, color: 'text-[#8FA39D]' };
   };
 

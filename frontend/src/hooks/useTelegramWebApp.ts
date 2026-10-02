@@ -10,6 +10,7 @@ export interface TelegramContextValue {
   haptic: typeof haptic;
   closeApp: () => void;
   expandApp: () => void;
+  requestWriteAccess: (callback?: (allowed: boolean) => void) => void;
 }
 
 export const TelegramContext = createContext<TelegramContextValue | null>(null);
@@ -26,6 +27,7 @@ export function useTelegramWebApp(): TelegramContextValue {
       haptic,
       closeApp: () => {},
       expandApp: () => {},
+      requestWriteAccess: () => {},
     };
   }
   return context;

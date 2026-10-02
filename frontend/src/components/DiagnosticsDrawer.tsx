@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Drawer } from 'vaul';
 import { logger, type LogEntry } from '@/lib/logger';
 import { haptic } from '@/lib/haptics';
+import { safeCopyToClipboard } from '@/lib/clipboard';
 import { Copy, Trash2, Check, Terminal } from 'lucide-react';
 
 interface DiagnosticsDrawerProps {
@@ -21,11 +22,20 @@ export const DiagnosticsDrawer: React.FC<DiagnosticsDrawerProps> = ({ open, onOp
     return unsubscribe;
   }, []);
 
-  const handleCopy = () => {
-    haptic.notification('success');
-    navigator.clipboard.writeText(logger.exportAsText());
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const handleCopy = async () => {
+    try {
+      const ok = await safeCopyToClipboard(logger.exportAsText());
+      if (ok) {
+        haptic.notification('success');
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } else {
+        haptic.notification('warning');
+      }
+    } catch (err) {
+      console.warn('[DiagnosticsDrawer] Copy failed:', err);
+      haptic.notification('error');
+    }
   };
 
   const handleClear = () => {

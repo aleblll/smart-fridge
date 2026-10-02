@@ -134,7 +134,7 @@ export function aggregateExpiringProducts(fridges = [], options = {}) {
 /**
  * Formats a user digest into a compact, clean HTML message with Telegram Mini App button.
  */
-export function formatDigestHtml(userDigest, appUrl = 'https://t.me/SmartFridgeBot/app') {
+export function formatDigestHtml(userDigest, appUrl = 'https://aleblll.github.io/smart-fridge/') {
   const lines = ['<b>❄️ Умный холодильник: утренний дайджест</b>', ''];
 
   if (userDigest.expiredOrToday.length > 0) {
@@ -282,7 +282,7 @@ export async function sendAllNotifications({
   workerUrl,
   cronSecret,
   botToken,
-  appUrl = 'https://t.me/SmartFridgeBot/app',
+  appUrl = 'https://aleblll.github.io/smart-fridge/',
   referenceDate = new Date(),
   fetchFn = fetch,
   sleepFn = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
@@ -295,7 +295,8 @@ export async function sendAllNotifications({
   // If fridgesData was not injected directly, fetch from Cloudflare Worker Edge Gateway
   if (!fridges) {
     if (!workerUrl) {
-      throw new Error('Missing CLOUDFLARE_WORKER_URL environment variable');
+      console.warn('⚠️ [Morning Notifier] CLOUDFLARE_WORKER_URL не настроен. Пропуск утреннего сканирования до развертывания D1 Worker.');
+      return { total: 0, sent: 0, blocked: 0, failed: 0 };
     }
 
     const endpoint = `${workerUrl.replace(/\/$/, '')}/api/cron/notify`;
@@ -374,7 +375,7 @@ if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith
   const workerUrl = process.env.CLOUDFLARE_WORKER_URL;
   const cronSecret = process.env.CRON_SECRET;
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
-  const appUrl = process.env.TELEGRAM_APP_URL || 'https://t.me/SmartFridgeBot/app';
+  const appUrl = process.env.TELEGRAM_APP_URL || 'https://aleblll.github.io/smart-fridge/';
 
   if (!botToken) {
     console.error('❌ Error: TELEGRAM_BOT_TOKEN is required');

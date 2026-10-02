@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { haptic } from '@/lib/haptics';
+import { safeCopyToClipboard } from '@/lib/clipboard';
 import { X, Copy, Check, Send, Users, QrCode } from 'lucide-react';
 
 interface ShareModalProps {
@@ -15,11 +16,20 @@ export const ShareModal: React.FC<ShareModalProps> = ({ open, onClose, userId })
 
   const inviteUrl = `https://t.me/Svezhestt_bot?startapp=fridge_${userId || 'home'}`;
 
-  const handleCopy = () => {
-    haptic.notification('success');
-    navigator.clipboard.writeText(inviteUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const handleCopy = async () => {
+    try {
+      const ok = await safeCopyToClipboard(inviteUrl);
+      if (ok) {
+        haptic.notification('success');
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } else {
+        haptic.notification('warning');
+      }
+    } catch (err) {
+      console.warn('[ShareModal] Copy failed:', err);
+      haptic.notification('error');
+    }
   };
 
   const handleShareTelegram = () => {

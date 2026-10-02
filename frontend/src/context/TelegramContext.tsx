@@ -18,6 +18,8 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const isTg = Boolean(webApp?.initData || (webApp?.version && webApp?.platform));
     setIsInsideTelegram(isTg);
 
+    let cleanup: (() => void) | undefined;
+
     if (webApp) {
       if (webApp.initDataUnsafe?.user) {
         setUser(webApp.initDataUnsafe.user as UserProfile);
@@ -36,16 +38,18 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       if (typeof webApp.onEvent === 'function') {
         webApp.onEvent('themeChanged', handleThemeChanged);
+        cleanup = () => {
+          if (typeof webApp.offEvent === 'function') {
+            webApp.offEvent('themeChanged', handleThemeChanged);
+          }
+        };
       }
-
-      return () => {
-        if (typeof webApp.offEvent === 'function') {
-          webApp.offEvent('themeChanged', handleThemeChanged);
-        }
-      };
     }
 
+    // Set ready state regardless of webApp presence
     setIsReady(true);
+
+    return cleanup;
   }, []);
 
   const closeApp = () => {
@@ -64,6 +68,20 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
+  const requestWriteAccess = (callback?: (allowed: boolean) => void) => {
+    try {
+      if (window.Telegram?.WebApp?.requestWriteAccess) {
+        window.Telegram.WebApp.requestWriteAccess(callback);
+      } else {
+        console.log('requestWriteAccess not supported in current environment');
+        callback?.(false);
+      }
+    } catch (err) {
+      console.warn('requestWriteAccess failed:', err);
+      callback?.(false);
+    }
+  };
+
   const value: TelegramContextValue = {
     isReady,
     isInsideTelegram,
@@ -72,6 +90,7 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     haptic,
     closeApp,
     expandApp,
+    requestWriteAccess,
   };
 
   return (

@@ -11,3 +11,9 @@ ENVIRONMENT = "production"
 binding = "FRIDGE_KV"
 id = "fridge_kv_namespace"
 preview_id = "fridge_kv_preview"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "smart-fridge-db"
+database_id = "smart-fridge-d1-id"
+

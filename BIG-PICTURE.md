@@ -3,26 +3,30 @@
 <!-- open-steps:begin -->
 ## Продукт и текущий статус
 
-Telegram Mini App для учета продуктов и контроля сроков годности по СанПиН/USDA в архитектуре Zero-VPS ($0/мес, без выделенных серверов).
+Telegram Mini App для учета продуктов и контроля сроков годности.
+Архитектурная модель: **Server-Authoritative (Cloudflare Workers + D1) с офлайн-кэшем**.
+Инфраструктурный бюджет: **0 руб/мес** (Free Tier Cloudflare + GitHub Pages).
 
-### Карта компонентов и стадия готовности
+### Карта компонентов и реальный статус (после аудита от 2026-10-03)
 
-| Компонент / Фича | Путь | Стадия | Доказательство готовности |
+| Компонент / Фича | Путь | Стадия | Доказательство готовности / Проблематика |
 |---|---|---|---|
-| Каркас TMA Frontend | `frontend/` | verified | React 19 + Tailwind v4 + Telegram SDK; билд 88.56 КБ gzip, ESLint clean |
-| Дизайн Mindora UI-KIT (TASK-006A) | `frontend/src/` | verified | Палитра Mindora, Hero свежести, асимметричные карточки еды, блок «Идея на вечер»; билд 2.94с |
-| Cloudflare Worker Edge Gateway | `worker/` | verified | HMAC SHA-256 валидация `initData`, whitelist DTO санитизация; 11/11 тестов пройдены |
-| Справочник продуктов SanPiN/USDA | `src/data/foodPresets.json` | verified | 122 позиции по 11 категориям, 76.35 КБ; 4/4 теста пройдены, 0 ошибок схемы |
-| Шторка быстрого добавления (Vaul Drawer) | `frontend/src/components/AddProductDrawer.tsx` | verified | Выбор произвольной даты (+2д..+1мес, степперы, календарь), sticky-кнопка, пресеты без закрытия; билд 2.74с |
-| Экран диагностики и логов | `frontend/src/components/DiagnosticsDrawer.tsx` | verified | Логи в реальном времени, системные метаданные (платформа, ID, CloudStorage), экспорт в буфер |
-| Семейный доступ и шаринг | `frontend/src/components/ShareModal.tsx` | verified | Инвайт-ссылки `startapp=fridge_<ID>`, нативный шеринг в Telegram, копирование в буфер |
-| Утренние push-уведомления (Cron) | `.github/workflows/notify.yml` | verified | GitHub Actions cron `0 6 * * *`, скрипт `notify.mjs`, рейт-лимитер 25 msg/s; 10/10 тестов пройдены |
+| Дизайн Mindora UI-KIT | `frontend/src/` | verified | Палитра Mindora, Hero свежести, карточки еды, frosted glass; чистый билд 2.8с |
+| Каркас TMA Frontend | `frontend/` | broken | Баг в `TelegramContext`: `setIsReady(true)` недостижим из-за `return` внутри `if(webApp)`; нет связи с API |
+| Cloudflare Worker Gateway | `worker/` | broken | Оторван от фронта; дыры в безопасности (обход CRON_SECRET, нет авторизации на холодильниках, `*` CORS) |
+| База данных и синхронизация | `worker/` / `D1` | queued | Требуется переход с KV на D1 (SQL: fridges, members, products); лимит CloudStorage 4 КБ рушит хранение |
+| Справочник продуктов | `src/data/foodPresets.json` | in_progress | 122 позиции, но нет яиц, дублируется в 2 местах; `opened_at` и `after_opening_hours` не используются в UI |
+| Шторка добавления продукта | `frontend/src/components/AddProductDrawer.tsx` | in_progress | Работает локально, но нет дробных значений (0.5 кг), рассинхрон UTC/локального времени |
+| Семейный доступ и инвайты | `frontend/src/components/ShareModal.tsx` | broken | Ссылка генерируется, но `start_param` в клиенте не разбирается; данные изолированы в CloudStorage |
+| Утренние push-уведомления | `scripts/notify.mjs` | broken | Падает 10 дней подряд (нет `CLOUDFLARE_WORKER_URL`), ссылка на чужого бота `SmartFridgeBot` |
+| Инфраструктура и тесты | Корень / CI | broken | Нет корневого `package.json`, тесты оторваны от воркера/фронта; мусор и дубли (`.js` vs `.mjs`, `inf_base`) |
 
-### Очередь задач (Sprint 2: Premium UI & Family Edge Sync)
-- Архитектурный стандарт: `[[Fridge_TMA_SSOT/01_Architecture/ADR/ADR-006_Agent_Orchestration_Inspo_MCP_and_Post_Build_QA.md|ADR-006]]`
-- Визуальный закон: `[[frontend/DESIGN-DIRECTION.md|DESIGN-DIRECTION.md]]`
-- Подробная дорожная карта: `[[Fridge_TMA_SSOT/04_Tasks/Sprint_02_Roadmap.md|Sprint_02_Roadmap.md]]`
-- `TASK-006A` (Frontend Lead): Редизайн эталонного главного экрана (Mindora UI-KIT) — ЗАВЕРШЕНО ✅.
-- `TASK-007` (QA Subagent): Автоматический контур верификации сборки (билд, линтер, 25+ Vitest тестов, Anti-Slop аудит) — ЗАВЕРШЕНО ✅.
-- `TASK-008` (Cloud Integrations): Развертывание Cloudflare Edge KV/D1 для семейной синхронизации между разными Telegram-аккаунтами (`startapp=fridge_<ID>`).
+### Очередь задач (Sprint 3: Капитальный ремонт архитектуры)
+- Архитектурный ревью-манифест: `[[Fridge_TMA_SSOT/01_Architecture/ADR/ADR-007_Server_Authoritative_D1_Architecture.md|ADR-007]]`
+- `TASK-010` (Инфраструктура & Клининг): Удалить дубли (`cloudflare-worker.js`, `notify.js`), создать корневой `package.json` (workspaces), связать vitest.
+- `TASK-011` (Клиентские фиксы): Починить `isReady` в `TelegramContext.tsx`, безопасный `clipboard.writeText`, ввод дробных чисел (0.5 кг), убрать терминал диагностики в скрытый режим.
+- `TASK-012` (Единые даты): Вынести калькулятор дней до срока в единую функцию без UTC-сдвигов (`YYYY-MM-DD` + локальная дата) и единый порог `notify_before_days`.
+- `TASK-013` (Cloudflare D1 Backend): Схема таблиц (`fridges`, `fridge_members`, `products`), строгая валидация `initData` с `auth_date`, защита CRON-эндпоинта, random UUID.
+- `TASK-014` (Сквозное подключение API): Перевод `storage.ts` на серверный D1 с очередью мутаций и локальным кэшем, разбор `start_param` при переходе по семейной ссылке.
+- `TASK-015` (Встроенные уведомления): Перенос рассылки в Cron Triggers воркера с учетом часовых поясов пользователей и корректной ссылкой на приложение.
 <!-- open-steps:end -->

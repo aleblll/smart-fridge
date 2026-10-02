@@ -44,6 +44,7 @@ declare global {
         onEvent?: (eventType: string, eventHandler: () => void) => void;
         offEvent?: (eventType: string, eventHandler: () => void) => void;
         openTelegramLink?: (url: string) => void;
+        requestWriteAccess?: (callback?: (allowed: boolean) => void) => void;
         CloudStorage?: {
           setItem: (key: string, value: string, callback?: (error: Error | null, result?: boolean) => void) => void;
           getItem: (key: string, callback: (error: Error | null, result?: string) => void) => void;

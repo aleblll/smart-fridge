@@ -50,7 +50,7 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
   const [name, setName] = useState('');
   const [category, setCategory] = useState('Другое');
   const [storageType, setStorageType] = useState<StorageType>('fridge');
-  const [quantity, setQuantity] = useState(1);
+  const [quantity, setQuantity] = useState<string>('1');
   const [unit, setUnit] = useState<UnitType>('pcs');
   const [daysOffset, setDaysOffset] = useState<number>(5);
   const [expiresAt, setExpiresAt] = useState<string>(() => {
@@ -96,7 +96,7 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
       setName('');
       setCategory('Другое');
       setStorageType('fridge');
-      setQuantity(1);
+      setQuantity('1');
       setUnit('pcs');
       setDays(5);
     }
@@ -131,13 +131,16 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
       return;
     }
 
+    const parsedQuantity = parseFloat(quantity);
+    const finalQuantity = !isNaN(parsedQuantity) && parsedQuantity > 0 ? parsedQuantity : 1;
+
     haptic.notification('success');
 
     onAddProduct({
       name: name.trim(),
       category: category || 'Другое',
       storage_type: storageType,
-      quantity,
+      quantity: finalQuantity,
       unit,
       opened_at: null,
       expires_at: expiresAt,
@@ -145,7 +148,7 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
       status: 'active',
     });
 
-    logger.info('INVENTORY', `Added product: ${name.trim()} (${quantity} ${unit}) expires: ${expiresAt}`);
+    logger.info('INVENTORY', `Added product: ${name.trim()} (${finalQuantity} ${unit}) expires: ${expiresAt}`);
     onOpenChange(false);
   };
 
@@ -340,25 +343,48 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <span className="text-xs font-medium text-[#8FA39D]">Количество</span>
-                  <div className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-[#222E2B] border border-white/[0.06]">
+                  <div className="flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-[#222E2B] border border-white/[0.06] focus-within:border-[#5E8B7E]">
                     <button
                       type="button"
                       onClick={() => {
                         haptic.impact('light');
-                        setQuantity((q) => Math.max(1, q - 1));
+                        const current = parseFloat(quantity) || 1;
+                        const step = unit === 'kg' || unit === 'l' ? 0.1 : 1;
+                        const next = Math.max(0.01, Math.round((current - step) * 100) / 100);
+                        setQuantity(String(next));
                       }}
-                      className="p-1 rounded-lg hover:bg-[#2A3834] text-[#8FA39D] hover:text-[#F1F5F4]"
+                      className="p-1 rounded-lg hover:bg-[#2A3834] text-[#8FA39D] hover:text-[#F1F5F4] active:scale-95 transition-all"
+                      aria-label="Уменьшить количество"
                     >
                       <Minus className="w-4 h-4" />
                     </button>
-                    <span className="font-mono text-sm font-semibold text-[#F1F5F4]">{quantity}</span>
+                    <input
+                      id="product-quantity"
+                      type="number"
+                      step="any"
+                      min="0.01"
+                      value={quantity}
+                      onChange={(e) => setQuantity(e.target.value)}
+                      onBlur={() => {
+                        const parsed = parseFloat(quantity);
+                        if (isNaN(parsed) || parsed <= 0) {
+                          setQuantity('1');
+                        }
+                      }}
+                      className="w-16 bg-transparent text-center font-mono text-sm font-semibold text-[#F1F5F4] focus:outline-none"
+                      placeholder="1"
+                    />
                     <button
                       type="button"
                       onClick={() => {
                         haptic.impact('light');
-                        setQuantity((q) => q + 1);
+                        const current = parseFloat(quantity) || 0;
+                        const step = unit === 'kg' || unit === 'l' ? 0.1 : 1;
+                        const next = Math.round((current + step) * 100) / 100;
+                        setQuantity(String(next));
                       }}
-                      className="p-1 rounded-lg hover:bg-[#2A3834] text-[#8FA39D] hover:text-[#F1F5F4]"
+                      className="p-1 rounded-lg hover:bg-[#2A3834] text-[#8FA39D] hover:text-[#F1F5F4] active:scale-95 transition-all"
+                      aria-label="Увеличить количество"
                     >
                       <Plus className="w-4 h-4" />
                     </button>

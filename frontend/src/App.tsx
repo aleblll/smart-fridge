@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { TelegramProvider } from '@/context/TelegramContext';
 import { useTelegramWebApp } from '@/hooks/useTelegramWebApp';
 import { AddProductDrawer } from '@/components/AddProductDrawer';
@@ -9,8 +9,9 @@ import { ShareModal } from '@/components/ShareModal';
 import { DiagnosticsDrawer } from '@/components/DiagnosticsDrawer';
 import { storage } from '@/lib/storage';
 import { logger } from '@/lib/logger';
+import { calculateFreshnessMetrics } from '@/lib/freshness';
 import type { ProductItem, StorageType, ProductStatus } from '@/types';
-import { Plus, Users, Search, Sparkles, Terminal, Snowflake, Archive, Refrigerator } from 'lucide-react';
+import { Plus, Users, Search, Sparkles, Snowflake, Archive, Refrigerator } from 'lucide-react';
 
 const CATEGORIES = [
   'Все',
@@ -91,6 +92,40 @@ function MainScreen() {
   });
   const [isLoaded, setIsLoaded] = useState(false);
 
+  // Hidden Easter Egg: Triple-tap or long-press on header title to open diagnostics
+  const tapCountRef = useRef(0);
+  const tapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleHeaderTitleClick = () => {
+    tapCountRef.current += 1;
+    if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
+
+    if (tapCountRef.current >= 3) {
+      tapCountRef.current = 0;
+      haptic.notification('success');
+      setDiagOpen(true);
+    } else {
+      tapTimerRef.current = setTimeout(() => {
+        tapCountRef.current = 0;
+      }, 500);
+    }
+  };
+
+  const handleHeaderTitleTouchStart = () => {
+    longPressTimerRef.current = setTimeout(() => {
+      haptic.notification('success');
+      setDiagOpen(true);
+    }, 750);
+  };
+
+  const handleHeaderTitleTouchEnd = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
   // Load products on start from Telegram CloudStorage / localStorage
   useEffect(() => {
     storage.loadProducts().then((loaded) => {
@@ -159,20 +194,23 @@ function MainScreen() {
     logger.info('INVENTORY', `Item ${id} permanently removed`);
   };
 
-  // Count items and freshness balance
+  // Count items and freshness balance with unified calculateFreshnessMetrics
   const counts = useMemo(() => {
     let active = 0;
     let expiringSoon = 0;
     let fresh = 0;
     let consumed = 0;
     let discarded = 0;
-    const now = Date.now();
 
     for (const p of products) {
       if (p.status === 'active') {
         active++;
-        const expTime = new Date(p.expires_at).getTime();
-        if (expTime - now <= 2 * 86400000) {
+        const metrics = calculateFreshnessMetrics(
+          p.expires_at,
+          p.created_at,
+          p.notify_before_days ?? 3
+        );
+        if (metrics.statusTag === 'expiring' || metrics.statusTag === 'expired') {
           expiringSoon++;
         } else {
           fresh++;
@@ -229,7 +267,16 @@ function MainScreen() {
       {/* 1. HERO-БЛОК СВЕЖЕСТИ (Mindora Calming Wellness Frosted Glass) */}
       <header className="rounded-2xl backdrop-blur-xl bg-white/[0.04] border border-white/[0.08] shadow-[inset_0_1px_1px_rgba(255,255,255,0.08),0_12px_32px_rgba(0,0,0,0.25)] p-4 space-y-3">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
+          {/* Header Title with Easter Egg: Triple-tap or Long-press opens Diagnostics */}
+          <div
+            onClick={handleHeaderTitleClick}
+            onTouchStart={handleHeaderTitleTouchStart}
+            onTouchEnd={handleHeaderTitleTouchEnd}
+            onMouseDown={handleHeaderTitleTouchStart}
+            onMouseUp={handleHeaderTitleTouchEnd}
+            className="flex items-center gap-2 cursor-pointer select-none active:opacity-85 transition-opacity"
+            title="Свежесть"
+          >
             <h1 className="text-xl font-semibold tracking-tight text-[#F1F5F4]">
               Свежесть
             </h1>
@@ -239,18 +286,6 @@ function MainScreen() {
           </div>
 
           <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => {
-                haptic.impact('light');
-                setDiagOpen(true);
-              }}
-              className="p-2 rounded-xl backdrop-blur-md bg-white/[0.05] border border-white/[0.06] text-[#8FA39D] hover:text-[#F1F5F4] hover:bg-white/[0.08] active:scale-95 transition-all shadow-xs"
-              title="Диагностика"
-            >
-              <Terminal className="w-3.5 h-3.5" />
-            </button>
-
             <button
               type="button"
               onClick={() => {
@@ -443,6 +478,20 @@ function MainScreen() {
           ))
         )}
       </section>
+
+      {/* 9. ФУТЕР (Кликабельная версия для быстрого доступа к диагностике) */}
+      <footer className="pt-4 pb-2 text-center select-none">
+        <button
+          type="button"
+          onClick={() => {
+            haptic.impact('light');
+            setDiagOpen(true);
+          }}
+          className="inline-flex items-center gap-1.5 text-[11px] font-mono text-[#8FA39D]/40 hover:text-[#8FA39D] active:scale-95 transition-all"
+        >
+          <span>Свежесть v1.0 • Сборка 2026.10</span>
+        </button>
+      </footer>
 
       {/* 8. FLOATING ACTION BUTTON (Primary Mindora Sage Button с мягким переливом) */}
       {activeTab === 'inventory' && (
