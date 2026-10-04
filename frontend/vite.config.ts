@@ -9,7 +9,7 @@ export default defineConfig({
     react(),
     tailwindcss()
   ],
-  base: './',
+  base: '/smart-fridge/',
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src')
