@@ -21,15 +21,13 @@ jobs:
           node-version: 22
 
       - name: Install dependencies
-        working-directory: frontend
         run: |
-          npm install --include=optional
-          npm install --no-save lightningcss-linux-x64-gnu
-
+          rm -f frontend/package-lock.json package-lock.json
+          npm install
 
       - name: Build frontend
-        working-directory: frontend
-        run: npm run build
+        run: npm run build --workspace=frontend
+
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
