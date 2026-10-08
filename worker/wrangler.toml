@@ -9,13 +9,12 @@ ENVIRONMENT = "production"
 
 [[kv_namespaces]]
 binding = "FRIDGE_KV"
-id = "fridge_kv_namespace"
-preview_id = "fridge_kv_preview"
+id = "229245076f964611ae2b95aa6d6db11a"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "smart-fridge-db"
-database_id = "smart-fridge-d1-id"
+database_id = "c448cffa-f1a3-463d-bd9c-f476eb16c486"
 
 [triggers]
 crons = ["0 6 * * *"] # 06:00 UTC = 09:00 MSK ежедневно (или каждые 30 минут)

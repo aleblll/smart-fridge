@@ -378,8 +378,8 @@ if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith
   const appUrl = process.env.TELEGRAM_APP_URL || 'https://aleblll.github.io/smart-fridge/';
 
   if (!botToken) {
-    console.error('❌ Error: TELEGRAM_BOT_TOKEN is required');
-    process.exit(1);
+    console.warn('⚠️ [Morning Notifier] TELEGRAM_BOT_TOKEN не настроен в GitHub Secrets. Пропуск утренней рассылки GitHub Actions (Cloudflare Worker выполняет рассылку автономно через Cron Trigger).');
+    process.exit(0);
   }
 
   sendAllNotifications({
