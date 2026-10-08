@@ -453,7 +453,10 @@ export const memoryStore = new Map<string, any>();
 const ALLOWED_ORIGINS = new Set([
   'https://aleblll.github.io',
   'http://localhost:5173',
-  'http://localhost:3000'
+  'http://localhost:3000',
+  'https://web.telegram.org',
+  'https://webk.telegram.org',
+  'https://webz.telegram.org'
 ]);
 
 export function getCorsHeaders(request?: Request): Record<string, string> {
@@ -902,6 +905,12 @@ export default {
     const corsHeaders = getCorsHeaders(request);
     const clientIP = request.headers.get('CF-Connecting-IP') || '127.0.0.1';
 
+    // Normalize pathname to support routes both with and without /api prefix
+    let normalizedPath = url.pathname;
+    if (!normalizedPath.startsWith('/api')) {
+      normalizedPath = `/api${normalizedPath.startsWith('/') ? '' : '/'}${normalizedPath}`;
+    }
+
     // Handle OPTIONS Preflight
     if (request.method === 'OPTIONS') {
       return new Response(null, {
@@ -921,7 +930,7 @@ export default {
     // ==========================================
     // 1. Route: GET/POST /api/cron/notify (Closed by default)
     // ==========================================
-    if (url.pathname === '/api/cron/notify') {
+    if (normalizedPath === '/api/cron/notify') {
       const cronSecret = env.CRON_SECRET;
       const providedSecret = request.headers.get('X-Cron-Secret') ||
         (request.headers.get('Authorization')?.startsWith('Bearer ') ? request.headers.get('Authorization')?.slice(7) : null);
@@ -975,7 +984,7 @@ export default {
     // ==========================================
     // 2. Route: POST /api/auth/validate
     // ==========================================
-    if (request.method === 'POST' && url.pathname === '/api/auth/validate') {
+    if (request.method === 'POST' && normalizedPath === '/api/auth/validate') {
       let initDataRaw = request.headers.get('X-Telegram-Init-Data') ||
         (request.headers.get('Authorization')?.startsWith('tma ') ? request.headers.get('Authorization')?.slice(4) : null);
 
@@ -1013,7 +1022,7 @@ export default {
     // ==========================================
     // Zero-Trust Auth Gate for all other /api/* routes
     // ==========================================
-    if (!url.pathname.startsWith('/api/')) {
+    if (!normalizedPath.startsWith('/api/')) {
       return jsonResponse({ error: 'Not Found', path: url.pathname }, 404, corsHeaders);
     }
 
@@ -1041,7 +1050,7 @@ export default {
     // ==========================================
     // 3. Route: GET /api/fridges/my
     // ==========================================
-    if (request.method === 'GET' && url.pathname === '/api/fridges/my') {
+    if (request.method === 'GET' && normalizedPath === '/api/fridges/my') {
       const myFridgesRes = await db.prepare(
         `SELECT f.id, f.name, f.created_at, f.updated_at, m.role
          FROM fridges f
@@ -1082,8 +1091,8 @@ export default {
     // ==========================================
     // 4. Invites Claim: POST /api/invites/:code/claim OR POST /api/invites/claim
     // ==========================================
-    const claimMatch = url.pathname.match(/^\/api\/invites\/([a-zA-Z0-9_-]+)\/claim$/);
-    const isLegacyClaim = request.method === 'POST' && url.pathname === '/api/invites/claim';
+    const claimMatch = normalizedPath.match(/^\/api\/invites\/([a-zA-Z0-9_-]+)\/claim$/);
+    const isLegacyClaim = request.method === 'POST' && normalizedPath === '/api/invites/claim';
 
     if (request.method === 'POST' && (claimMatch || isLegacyClaim)) {
       let inviteCode = claimMatch ? claimMatch[1] : '';
@@ -1133,8 +1142,8 @@ export default {
     // ==========================================
     // 5. Invites Create: POST /api/fridges/:id/invites OR POST /api/invites/create
     // ==========================================
-    const inviteCreateMatch = url.pathname.match(/^\/api\/fridges\/([a-zA-Z0-9_-]+)\/invites$/);
-    const isLegacyInviteCreate = request.method === 'POST' && url.pathname === '/api/invites/create';
+    const inviteCreateMatch = normalizedPath.match(/^\/api\/fridges\/([a-zA-Z0-9_-]+)\/invites$/);
+    const isLegacyInviteCreate = request.method === 'POST' && normalizedPath === '/api/invites/create';
 
     if (request.method === 'POST' && (inviteCreateMatch || isLegacyInviteCreate)) {
       let fridgeId = inviteCreateMatch ? inviteCreateMatch[1] : '';
@@ -1174,11 +1183,11 @@ export default {
     // ==========================================
     // 6. Fridge & Products CRUD Routes
     // ==========================================
-    const fridgeMatch = url.pathname.match(/^\/api\/fridges\/([a-zA-Z0-9_-]+)(?:\/products(?:\/([a-zA-Z0-9_-]+))?)?$/);
+    const fridgeMatch = normalizedPath.match(/^\/api\/fridges\/([a-zA-Z0-9_-]+)(?:\/products(?:\/([a-zA-Z0-9_-]+))?)?$/);
 
     if (fridgeMatch) {
       const fridgeId = fridgeMatch[1];
-      const isProductRoute = url.pathname.includes('/products');
+      const isProductRoute = normalizedPath.includes('/products');
       const productId = fridgeMatch[2];
 
       // Resource-Level Auth: Check membership in fridge_members

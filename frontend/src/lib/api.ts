@@ -7,17 +7,40 @@ import type {
   ProductItem,
 } from '@/types';
 
-// Default to relative /api or custom Cloudflare Worker domain from env
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
-
 /**
  * Retrieves raw Telegram initData string for authorization
  */
 export function getTelegramInitData(): string {
-  if (typeof window !== 'undefined' && window.Telegram?.WebApp?.initData) {
-    return window.Telegram.WebApp.initData;
+  if (typeof window !== 'undefined') {
+    if (window.Telegram?.WebApp?.initData) {
+      return window.Telegram.WebApp.initData;
+    }
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const tgInitData = urlParams.get('tgWebAppData');
+      if (tgInitData) return tgInitData;
+      const hashParams = new URLSearchParams(window.location.hash.slice(1));
+      const hashInitData = hashParams.get('tgWebAppData');
+      if (hashInitData) return hashInitData;
+    } catch {}
   }
   return '';
+}
+
+/**
+ * Normalizes API endpoint URL ensuring /api prefix is always present
+ */
+export function getApiUrl(endpoint: string): string {
+  const base = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/+$/, '');
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+
+  if (base.endsWith('/api') && cleanEndpoint.startsWith('/api')) {
+    return `${base}${cleanEndpoint.slice(4)}`;
+  }
+  if (!base.endsWith('/api') && !cleanEndpoint.startsWith('/api')) {
+    return `${base}/api${cleanEndpoint}`;
+  }
+  return `${base}${cleanEndpoint}`;
 }
 
 /**
@@ -28,7 +51,7 @@ async function request<T>(
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> {
   const initData = getTelegramInitData();
-  const url = `${API_BASE_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
+  const url = getApiUrl(endpoint);
 
   const headers: HeadersInit = {
     'Content-Type': 'application/json',

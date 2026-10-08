@@ -22,6 +22,7 @@ import {
   Refrigerator,
   CheckCircle2,
   ChevronDown,
+  RefreshCw,
 } from 'lucide-react';
 
 const CATEGORIES = [
@@ -215,6 +216,21 @@ function MainScreen() {
     };
   }, [haptic, showToast]);
 
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  // Background refresh helper
+  const refreshProducts = useCallback(async () => {
+    if (!activeFridgeId) return;
+    setIsSyncing(true);
+    try {
+      await storage.loadProducts(activeFridgeId, (serverProducts) => {
+        setProducts(serverProducts);
+      });
+    } finally {
+      setTimeout(() => setIsSyncing(false), 500);
+    }
+  }, [activeFridgeId]);
+
   // Load products when activeFridgeId changes
   useEffect(() => {
     if (!activeFridgeId) return;
@@ -226,10 +242,28 @@ function MainScreen() {
     }
 
     // 2. Background sync to D1 server
-    storage.loadProducts(activeFridgeId, (serverProducts) => {
-      setProducts(serverProducts);
-    });
-  }, [activeFridgeId]);
+    refreshProducts();
+  }, [activeFridgeId, refreshProducts]);
+
+  // Auto-refresh when app window regains focus or comes into foreground
+  useEffect(() => {
+    const handleFocus = () => {
+      refreshProducts();
+    };
+
+    window.addEventListener('focus', handleFocus);
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        refreshProducts();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [refreshProducts]);
 
   // Handle switching active fridge
   const handleSelectFridge = (fridgeId: string) => {
@@ -464,6 +498,19 @@ function MainScreen() {
                 )}
               </div>
             )}
+
+            {/* Refresh / Sync Button */}
+            <button
+              type="button"
+              onClick={() => {
+                haptic.impact('light');
+                refreshProducts();
+              }}
+              className="p-2 rounded-xl backdrop-blur-md bg-white/[0.05] border border-white/[0.06] text-[#8FA39D] hover:text-[#F1F5F4] hover:bg-white/[0.08] active:scale-95 transition-all shadow-xs"
+              title="Синхронизировать с облаком"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-[#5E8B7E]' : ''}`} />
+            </button>
 
             <button
               type="button"
