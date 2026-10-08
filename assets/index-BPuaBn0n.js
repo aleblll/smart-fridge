@@ -1,4 +1,4 @@
-import{r as d,j as e,d as gt}from"./vendor-react-BbazGGoS.js";import{B as bt,o as J,a as ee,X as re,s as ie,Y as yt}from"./vendor-telegram-D-GpRNsI.js";import{D as P}from"./vendor-vaul-Cv55QgRh.js";import{p as wt}from"./data-presets-DHkpWVg2.js";(function(){const t=document.createElement("link").relList;if(t&&t.supports&&t.supports("modulepreload"))return;for(const r of document.querySelectorAll('link[rel="modulepreload"]'))a(r);new MutationObserver(r=>{for(const l of r)if(l.type==="childList")for(const h of l.addedNodes)h.tagName==="LINK"&&h.rel==="modulepreload"&&a(h)}).observe(document,{childList:!0,subtree:!0});function n(r){const l={};return r.integrity&&(l.integrity=r.integrity),r.referrerPolicy&&(l.referrerPolicy=r.referrerPolicy),r.crossOrigin==="use-credentials"?l.credentials="include":r.crossOrigin==="anonymous"?l.credentials="omit":l.credentials="same-origin",l}function a(r){if(r.ep)return;r.ep=!0;const l=n(r);fetch(r.href,l)}})();function ue(){if(typeof document>"u")return;const s=document.documentElement,t=typeof window<"u"?window.Telegram?.WebApp:void 0,n=t?.themeParams;n&&(n.bg_color&&s.style.setProperty("--tg-theme-bg-color",n.bg_color),n.secondary_bg_color&&s.style.setProperty("--tg-theme-secondary-bg-color",n.secondary_bg_color),n.section_bg_color&&s.style.setProperty("--tg-theme-section-bg-color",n.section_bg_color),n.text_color&&s.style.setProperty("--tg-theme-text-color",n.text_color),n.hint_color&&s.style.setProperty("--tg-theme-hint-color",n.hint_color),n.link_color&&s.style.setProperty("--tg-theme-link-color",n.link_color),n.button_color&&s.style.setProperty("--tg-theme-button-color",n.button_color),n.button_text_color&&s.style.setProperty("--tg-theme-button-text-color",n.button_text_color)),t?.colorScheme&&(s.setAttribute("data-theme",t.colorScheme),t.colorScheme==="dark"?s.classList.add("dark"):s.classList.remove("dark"))}function jt(){if(typeof window>"u")return!1;try{bt(),J.isSupported()&&(J.isMounted()||J.mount(),J.disableVertical.isAvailable()&&J.disableVertical()),ee.mount.isAvailable()&&ee.mount().then(()=>{ee.expand.isAvailable()&&ee.expand()}).catch(t=>{console.warn("[Telegram SDK] Viewport mount failed:",t)}),re.mount.isAvailable()&&(re.mount(),re.ready()),ie.mount.isAvailable()&&(ie.mount(),ie.bindCssVars());try{yt.restore()}catch{}}catch(t){console.warn("[Telegram SDK] SDK initialization fallback to window.Telegram:",t)}const s=window.Telegram?.WebApp;if(s)try{s.ready(),s.expand(),typeof s.disableVerticalSwipes=="function"&&s.disableVerticalSwipes(),typeof s.onEvent=="function"&&s.onEvent("themeChanged",ue)}catch(t){console.warn("[Telegram Native] Failed native WebApp call:",t)}return ue(),!0}const F={impact:(s="light")=>{try{typeof window<"u"&&window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(s)}catch{}},notification:s=>{try{typeof window<"u"&&window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred(s)}catch{}},selection:()=>{try{typeof window<"u"&&window.Telegram?.WebApp?.HapticFeedback?.selectionChanged()}catch{}}},_e=d.createContext(null);function vt(){const s=d.useContext(_e);return s||{isReady:!0,isInsideTelegram:!1,user:null,colorScheme:"dark",haptic:F,closeApp:()=>{},expandApp:()=>{},requestWriteAccess:()=>{}}}const Nt=({children:s})=>{const[t,n]=d.useState(!1),[a,r]=d.useState(!1),[l,h]=d.useState(null),[p,x]=d.useState("dark");d.useEffect(()=>{jt();const u=typeof window<"u"?window.Telegram?.WebApp:void 0,f=!!(u?.initData||u?.version&&u?.platform);r(f);let g;if(u){u.initDataUnsafe?.user&&h(u.initDataUnsafe.user),u.colorScheme&&x(u.colorScheme);const j=()=>{ue(),u.colorScheme&&x(u.colorScheme)};typeof u.onEvent=="function"&&(u.onEvent("themeChanged",j),g=()=>{typeof u.offEvent=="function"&&u.offEvent("themeChanged",j)})}return n(!0),g},[]);const m={isReady:t,isInsideTelegram:a,user:l,colorScheme:p,haptic:F,closeApp:()=>{try{window.Telegram?.WebApp?.close()}catch{console.log("Close called outside Telegram")}},expandApp:()=>{try{window.Telegram?.WebApp?.expand()}catch{}},requestWriteAccess:u=>{try{window.Telegram?.WebApp?.requestWriteAccess?window.Telegram.WebApp.requestWriteAccess(u):(console.log("requestWriteAccess not supported in current environment"),u?.(!1))}catch(f){console.warn("requestWriteAccess failed:",f),u?.(!1)}}};return e.jsx(_e.Provider,{value:m,children:s})},he=wt,Ft=he.slice(0,8);function Et(s,t=6){const n=s.trim().toLowerCase();if(n.length<2)return Ft.slice(0,t);const a=[];for(const r of he){const l=r.name.toLowerCase().includes(n),h=r.synonyms?.some(p=>p.toLowerCase().includes(n));if((l||h)&&(a.push(r),a.length>=t))break}return a}function kt(s,t="fridge"){const n=s.shelf_life_days[t]??s.shelf_life_days.fridge??3,a=new Date;return a.setDate(a.getDate()+n),a.toISOString().slice(0,10)}function _t(s){return s.shelf_life_days.fridge!==null?"fridge":s.shelf_life_days.pantry!==null?"pantry":s.shelf_life_days.freezer!==null?"freezer":"fridge"}class At{logs=[];maxLogs=100;listeners=[];constructor(){this.info("SYSTEM","AppLogger initialized")}add(t,n,a,r){const l={id:`log-${Date.now()}-${Math.random().toString(36).slice(2,5)}`,timestamp:new Date().toLocaleTimeString(),level:t,category:n,message:a,data:r};this.logs.unshift(l),this.logs.length>this.maxLogs&&this.logs.pop(),this.notify()}info(t,n,a){this.add("info",t,n,a),console.log(`[${t}] ${n}`,a??"")}warn(t,n,a){this.add("warn",t,n,a),console.warn(`[${t}] ${n}`,a??"")}error(t,n,a){this.add("error",t,n,a),console.error(`[${t}] ${n}`,a??"")}sync(t,n){this.add("sync","SYNC",t,n),console.log(`[SYNC] ${t}`,n??"")}getLogs(){return[...this.logs]}clear(){this.logs=[],this.notify()}subscribe(t){return this.listeners.push(t),()=>{this.listeners=this.listeners.filter(n=>n!==t)}}notify(){this.listeners.forEach(t=>t())}exportAsText(){const t=`=== Smart Fridge TMA Diagnostics ===
+import{r as d,j as e,d as gt}from"./vendor-react-BbazGGoS.js";import{B as bt,o as J,a as ee,X as re,s as ie,Y as yt}from"./vendor-telegram-D-GpRNsI.js";import{D as P}from"./vendor-vaul-CYeqpFy1.js";import{p as wt}from"./data-presets-DHkpWVg2.js";(function(){const t=document.createElement("link").relList;if(t&&t.supports&&t.supports("modulepreload"))return;for(const r of document.querySelectorAll('link[rel="modulepreload"]'))a(r);new MutationObserver(r=>{for(const l of r)if(l.type==="childList")for(const h of l.addedNodes)h.tagName==="LINK"&&h.rel==="modulepreload"&&a(h)}).observe(document,{childList:!0,subtree:!0});function n(r){const l={};return r.integrity&&(l.integrity=r.integrity),r.referrerPolicy&&(l.referrerPolicy=r.referrerPolicy),r.crossOrigin==="use-credentials"?l.credentials="include":r.crossOrigin==="anonymous"?l.credentials="omit":l.credentials="same-origin",l}function a(r){if(r.ep)return;r.ep=!0;const l=n(r);fetch(r.href,l)}})();function ue(){if(typeof document>"u")return;const s=document.documentElement,t=typeof window<"u"?window.Telegram?.WebApp:void 0,n=t?.themeParams;n&&(n.bg_color&&s.style.setProperty("--tg-theme-bg-color",n.bg_color),n.secondary_bg_color&&s.style.setProperty("--tg-theme-secondary-bg-color",n.secondary_bg_color),n.section_bg_color&&s.style.setProperty("--tg-theme-section-bg-color",n.section_bg_color),n.text_color&&s.style.setProperty("--tg-theme-text-color",n.text_color),n.hint_color&&s.style.setProperty("--tg-theme-hint-color",n.hint_color),n.link_color&&s.style.setProperty("--tg-theme-link-color",n.link_color),n.button_color&&s.style.setProperty("--tg-theme-button-color",n.button_color),n.button_text_color&&s.style.setProperty("--tg-theme-button-text-color",n.button_text_color)),t?.colorScheme&&(s.setAttribute("data-theme",t.colorScheme),t.colorScheme==="dark"?s.classList.add("dark"):s.classList.remove("dark"))}function jt(){if(typeof window>"u")return!1;try{bt(),J.isSupported()&&(J.isMounted()||J.mount(),J.disableVertical.isAvailable()&&J.disableVertical()),ee.mount.isAvailable()&&ee.mount().then(()=>{ee.expand.isAvailable()&&ee.expand()}).catch(t=>{console.warn("[Telegram SDK] Viewport mount failed:",t)}),re.mount.isAvailable()&&(re.mount(),re.ready()),ie.mount.isAvailable()&&(ie.mount(),ie.bindCssVars());try{yt.restore()}catch{}}catch(t){console.warn("[Telegram SDK] SDK initialization fallback to window.Telegram:",t)}const s=window.Telegram?.WebApp;if(s)try{s.ready(),s.expand(),typeof s.disableVerticalSwipes=="function"&&s.disableVerticalSwipes(),typeof s.onEvent=="function"&&s.onEvent("themeChanged",ue)}catch(t){console.warn("[Telegram Native] Failed native WebApp call:",t)}return ue(),!0}const F={impact:(s="light")=>{try{typeof window<"u"&&window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(s)}catch{}},notification:s=>{try{typeof window<"u"&&window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred(s)}catch{}},selection:()=>{try{typeof window<"u"&&window.Telegram?.WebApp?.HapticFeedback?.selectionChanged()}catch{}}},_e=d.createContext(null);function vt(){const s=d.useContext(_e);return s||{isReady:!0,isInsideTelegram:!1,user:null,colorScheme:"dark",haptic:F,closeApp:()=>{},expandApp:()=>{},requestWriteAccess:()=>{}}}const Nt=({children:s})=>{const[t,n]=d.useState(!1),[a,r]=d.useState(!1),[l,h]=d.useState(null),[p,x]=d.useState("dark");d.useEffect(()=>{jt();const u=typeof window<"u"?window.Telegram?.WebApp:void 0,f=!!(u?.initData||u?.version&&u?.platform);r(f);let g;if(u){u.initDataUnsafe?.user&&h(u.initDataUnsafe.user),u.colorScheme&&x(u.colorScheme);const j=()=>{ue(),u.colorScheme&&x(u.colorScheme)};typeof u.onEvent=="function"&&(u.onEvent("themeChanged",j),g=()=>{typeof u.offEvent=="function"&&u.offEvent("themeChanged",j)})}return n(!0),g},[]);const m={isReady:t,isInsideTelegram:a,user:l,colorScheme:p,haptic:F,closeApp:()=>{try{window.Telegram?.WebApp?.close()}catch{console.log("Close called outside Telegram")}},expandApp:()=>{try{window.Telegram?.WebApp?.expand()}catch{}},requestWriteAccess:u=>{try{window.Telegram?.WebApp?.requestWriteAccess?window.Telegram.WebApp.requestWriteAccess(u):(console.log("requestWriteAccess not supported in current environment"),u?.(!1))}catch(f){console.warn("requestWriteAccess failed:",f),u?.(!1)}}};return e.jsx(_e.Provider,{value:m,children:s})},he=wt,Ft=he.slice(0,8);function Et(s,t=6){const n=s.trim().toLowerCase();if(n.length<2)return Ft.slice(0,t);const a=[];for(const r of he){const l=r.name.toLowerCase().includes(n),h=r.synonyms?.some(p=>p.toLowerCase().includes(n));if((l||h)&&(a.push(r),a.length>=t))break}return a}function kt(s,t="fridge"){const n=s.shelf_life_days[t]??s.shelf_life_days.fridge??3,a=new Date;return a.setDate(a.getDate()+n),a.toISOString().slice(0,10)}function _t(s){return s.shelf_life_days.fridge!==null?"fridge":s.shelf_life_days.pantry!==null?"pantry":s.shelf_life_days.freezer!==null?"freezer":"fridge"}class At{logs=[];maxLogs=100;listeners=[];constructor(){this.info("SYSTEM","AppLogger initialized")}add(t,n,a,r){const l={id:`log-${Date.now()}-${Math.random().toString(36).slice(2,5)}`,timestamp:new Date().toLocaleTimeString(),level:t,category:n,message:a,data:r};this.logs.unshift(l),this.logs.length>this.maxLogs&&this.logs.pop(),this.notify()}info(t,n,a){this.add("info",t,n,a),console.log(`[${t}] ${n}`,a??"")}warn(t,n,a){this.add("warn",t,n,a),console.warn(`[${t}] ${n}`,a??"")}error(t,n,a){this.add("error",t,n,a),console.error(`[${t}] ${n}`,a??"")}sync(t,n){this.add("sync","SYNC",t,n),console.log(`[SYNC] ${t}`,n??"")}getLogs(){return[...this.logs]}clear(){this.logs=[],this.notify()}subscribe(t){return this.listeners.push(t),()=>{this.listeners=this.listeners.filter(n=>n!==t)}}notify(){this.listeners.forEach(t=>t())}exportAsText(){const t=`=== Smart Fridge TMA Diagnostics ===
 Time: ${new Date().toISOString()}
 Platform: ${window.Telegram?.WebApp?.platform||"browser"}
 TG Version: ${window.Telegram?.WebApp?.version||"N/A"}
@@ -6,187 +6,187 @@ User ID: ${window.Telegram?.WebApp?.initDataUnsafe?.user?.id||"anonymous"}
 
 `,n=this.logs.map(a=>`[${a.timestamp}] [${a.level.toUpperCase()}] [${a.category}] ${a.message} ${a.data?JSON.stringify(a.data):""}`).join(`
 `);return t+n}}const w=new At;/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */const Dt=s=>s?.replace(/([a-z0-9])([A-Z])/g,"$1-$2").toLowerCase();/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */function Ct(s,t,n=[]){if(t==null)throw new Error("[lucide]: iconNode is required when icon name is used");return{name:Dt(s),size:24,node:t,...n.length>0?{aliases:n}:{}}}/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */const St=s=>{let t="",n=!1;for(const a of s){if(a==="-"||a==="_"||a<=" "){n=t.length>0;continue}t.length===0?t+=a.toLowerCase():t+=n?a.toUpperCase():a,n=!1}return t};/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */const Tt=s=>{const t=St(s);return t.charAt(0).toUpperCase()+t.slice(1)};/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */const xe=(...s)=>s.filter((t,n,a)=>!!t&&t.trim()!==""&&a.indexOf(t)===n).join(" ").trim();/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */const K={xmlns:"http://www.w3.org/2000/svg",width:24,height:24,viewBox:"0 0 24 24",fill:"none",stroke:"currentColor","stroke-width":2,"stroke-linecap":"round","stroke-linejoin":"round"};/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */function oe(s){return s!=null}function $t(s,t={}){const n=t.attributeNames??{},a=m=>n[m]??m,r=s.size??s.width??K.width,l=s.size??s.height??K.height,h=s.aliases?.filter(m=>typeof m=="string"&&m.trim()!=="").map(m=>`lucide-${m}`)??[],p=[...s.name?[`lucide-${s.name}`]:[],...h],x=t.className?.split(" ").filter(Boolean)??[],o=t.includeDefaultClasses===!1?xe(...x):xe("lucide",...p,...x),v=t.absoluteStrokeWidth?Number(t.strokeWidth??K["stroke-width"])*Number(s.size??s.width??K.width)/Number(t.size??t.width??K.width):t.strokeWidth??K["stroke-width"];return["svg",{...Object.entries(K).reduce((m,[u,f])=>(m[a(u)]=f,m),{}),..."color"in t&&t.color&&{[a("stroke")]:t.color},..."size"in t&&oe(t.size)&&{[a("width")]:t.size,[a("height")]:t.size},..."width"in t&&oe(t.width)&&{[a("width")]:t.width},..."height"in t&&oe(t.height)&&{[a("height")]:t.height},[a("stroke-width")]:v,...o&&{[a("class")]:o},[a("viewBox")]:`0 0 ${r} ${l}`,...t.hasA11yProp===!1?{[a("aria-hidden")]:"true"}:{},..."attributes"in t&&t.attributes},s.node.map(m=>{const[u,f,g]=m,j=t.nonScalingStroke?{[a("vector-effect")]:"non-scaling-stroke",...f}:f;return g?[u,j,g]:[u,j]})]}/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */function Pt(s,t={}){return $t(s,{...t,attributeNames:{...t.attributeNames,class:"className","stroke-width":"strokeWidth","stroke-linecap":"strokeLinecap","stroke-linejoin":"strokeLinejoin","vector-effect":"vectorEffect"}})}/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */const Mt=s=>{for(const t in s)if(t.startsWith("aria-")||t==="role"||t==="title")return!0;return!1},It=d.createContext({}),Bt=()=>d.useContext(It),Ot=d.forwardRef(({color:s,size:t,width:n,height:a,strokeWidth:r,absoluteStrokeWidth:l,nonScalingStroke:h,className:p="",children:x,iconNode:o=[],icon:v={node:o,aliases:[],size:24},...N},m)=>{const{size:u=24,strokeWidth:f=2,absoluteStrokeWidth:g=!1,nonScalingStroke:j=!1,color:z="currentColor",className:I=""}=Bt()??{},G=!!x||Mt(N),[B,H,k=[]]=Pt(v,{color:s??z,width:n??t??u,height:a??t??u,strokeWidth:r??f,absoluteStrokeWidth:l??g,nonScalingStroke:h??j,className:xe(I,p),hasA11yProp:G,attributes:N});return d.createElement(B,{ref:m,...H},[...k.map(([q,V])=>d.createElement(q,V)),...Array.isArray(x)?x:[x]])});/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */function E(s,t=[],n=[]){const a=typeof s=="string"?Ct(s,t,n):s,r=d.forwardRef(({className:l,...h},p)=>d.createElement(Ot,{ref:p,icon:a,className:l,...h}));return a.name&&(r.displayName=Tt(a.name)),r}/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */const Ae={name:"archive",size:24,node:[["rect",{width:"20",height:"5",x:"2",y:"3",rx:"1",key:"1wp1u1"}],["path",{d:"M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8",key:"1s80jp"}],["path",{d:"M10 12h4",key:"a56b0p"}]]};Ae.node;const pe=E(Ae);/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */const De={name:"arrow-right",size:24,node:[["path",{d:"M5 12h14",key:"1ays0h"}],["path",{d:"m12 5 7 7-7 7",key:"xquz4c"}]]};De.node;const Rt=E(De);/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */const Ce={name:"box",size:24,node:[["path",{d:"M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z",key:"hh9hay"}],["path",{d:"m3.3 7 8.7 5 8.7-5",key:"g66t2b"}],["path",{d:"M12 22V12",key:"d0xqtd"}]]};Ce.node;const je=E(Ce);/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */const Se={name:"calendar",size:24,node:[["path",{d:"M8 2v3",key:"1ioesn"}],["path",{d:"M16 2v3",key:"otl347"}],["rect",{x:"3",y:"3",width:"18",height:"18",rx:"2",key:"h1oib"}],["path",{d:"M3 9h18",key:"1pudct"}]]};Se.node;const Lt=E(Se);/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */const Te={name:"check",size:24,node:[["path",{d:"M20 6 9 17l-5-5",key:"1gmf2c"}]]};Te.node;const Q=E(Te);/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */const $e={name:"chef-hat",size:24,node:[["path",{d:"M17 21a1 1 0 0 0 1-1v-5.35c0-.457.316-.844.727-1.041a4 4 0 0 0-2.134-7.589 5 5 0 0 0-9.186 0 4 4 0 0 0-2.134 7.588c.411.198.727.585.727 1.041V20a1 1 0 0 0 1 1Z",key:"1qvrer"}],["path",{d:"M6 17h12",key:"1jwigz"}]]};$e.node;const zt=E($e);/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */const Pe={name:"chevron-down",size:24,node:[["path",{d:"m6 9 6 6 6-6",key:"qrunsl"}]]};Pe.node;const qt=E(Pe);/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */const Me={name:"chevron-right",size:24,node:[["path",{d:"m9 18 6-6-6-6",key:"mthhwq"}]]};Me.node;const ve=E(Me);/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */const Ie={name:"circle-alert",size:24,node:[["circle",{cx:"12",cy:"12",r:"10",key:"1mglay"}],["line",{x1:"12",x2:"12",y1:"8",y2:"12",key:"1pkeuh"}],["line",{x1:"12",x2:"12.01",y1:"16",y2:"16",key:"4dfq90"}]],aliases:["alert-circle"]};Ie.node;const Ut=E(Ie);/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */const Be={name:"circle-check",size:24,node:[["circle",{cx:"12",cy:"12",r:"10",key:"1mglay"}],["path",{d:"m16 9-5.5 5.5L8 12",key:"xofnsj"}]],aliases:["check-circle-2"]};Be.node;const Wt=E(Be);/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */const Oe={name:"clock",size:24,node:[["circle",{cx:"12",cy:"12",r:"10",key:"1mglay"}],["path",{d:"M12 6v6l4 2",key:"mmk7yg"}]]};Oe.node;const Re=E(Oe);/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */const Le={name:"copy",size:24,node:[["rect",{width:"14",height:"14",x:"8",y:"8",rx:"2",ry:"2",key:"17jyea"}],["path",{d:"M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2",key:"zix9uf"}]]};Le.node;const ze=E(Le);/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */const qe={name:"loader-circle",size:24,node:[["path",{d:"M21 12a9 9 0 1 1-6.219-8.56",key:"13zald"}]],aliases:["loader-2"]};qe.node;const Gt=E(qe);/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */const Ue={name:"minus",size:24,node:[["path",{d:"M5 12h14",key:"1ays0h"}]]};Ue.node;const Vt=E(Ue);/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */const We={name:"plus",size:24,node:[["path",{d:"M5 12h14",key:"1ays0h"}],["path",{d:"M12 5v14",key:"s699le"}]]};We.node;const Ge=E(We);/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */const Ve={name:"qr-code",size:24,node:[["rect",{width:"5",height:"5",x:"3",y:"3",rx:"1",key:"1tu5fj"}],["rect",{width:"5",height:"5",x:"16",y:"3",rx:"1",key:"1v8r4q"}],["rect",{width:"5",height:"5",x:"3",y:"16",rx:"1",key:"1x03jg"}],["path",{d:"M21 16h-3a2 2 0 0 0-2 2v3",key:"177gqh"}],["path",{d:"M21 21v.01",key:"ents32"}],["path",{d:"M12 7v3a2 2 0 0 1-2 2H7",key:"8crl2c"}],["path",{d:"M3 12h.01",key:"nlz23k"}],["path",{d:"M12 3h.01",key:"n36tog"}],["path",{d:"M12 16v.01",key:"133mhm"}],["path",{d:"M16 12h1",key:"1slzba"}],["path",{d:"M21 12v.01",key:"1lwtk9"}],["path",{d:"M12 21v-1",key:"1880an"}]]};Ve.node;const Ht=E(Ve);/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */const He={name:"refrigerator",size:24,node:[["path",{d:"M5 6a4 4 0 0 1 4-4h6a4 4 0 0 1 4 4v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6Z",key:"fpq118"}],["path",{d:"M5 10h14",key:"elsbfy"}],["path",{d:"M15 7v6",key:"1nx30x"}]]};He.node;const Ye=E(He);/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */const Ke={name:"rotate-ccw",size:24,node:[["path",{d:"M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8",key:"1357e3"}],["path",{d:"M3 3v5h5",key:"1xhq8a"}]]};Ke.node;const Yt=E(Ke);/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */const Qe={name:"search",size:24,node:[["path",{d:"m21 21-4.34-4.34",key:"14j7rj"}],["circle",{cx:"11",cy:"11",r:"8",key:"4ej97u"}]]};Qe.node;const Je=E(Qe);/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */const Ze={name:"send",size:24,node:[["path",{d:"M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z",key:"1ffxy3"}],["path",{d:"m21.854 2.147-10.94 10.939",key:"12cjpa"}]]};Ze.node;const Kt=E(Ze);/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */const Xe={name:"snowflake",size:24,node:[["path",{d:"m10 20-1.25-2.5L6 18",key:"18frcb"}],["path",{d:"M10 4 8.75 6.5 6 6",key:"7mghy3"}],["path",{d:"m14 20 1.25-2.5L18 18",key:"1chtki"}],["path",{d:"m14 4 1.25 2.5L18 6",key:"1b4wsy"}],["path",{d:"m17 21-3-6h-4",key:"15hhxa"}],["path",{d:"m17 3-3 6 1.5 3",key:"11697g"}],["path",{d:"M2 12h6.5L10 9",key:"kv9z4n"}],["path",{d:"m20 10-1.5 2 1.5 2",key:"1swlpi"}],["path",{d:"M22 12h-6.5L14 15",key:"1mxi28"}],["path",{d:"m4 10 1.5 2L4 14",key:"k9enpj"}],["path",{d:"m7 21 3-6-1.5-3",key:"j8hb9u"}],["path",{d:"m7 3 3 6h4",key:"1otusx"}]]};Xe.node;const fe=E(Xe);/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */const et={name:"sparkles",size:24,node:[["path",{d:"M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z",key:"1s2grr"}],["path",{d:"M20 2v4",key:"1rf3ol"}],["path",{d:"M22 4h-4",key:"gwowj6"}],["circle",{cx:"4",cy:"20",r:"2",key:"6kqj1y"}]],aliases:["stars"]};et.node;const se=E(et);/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */const tt={name:"terminal",size:24,node:[["path",{d:"M12 19h8",key:"baeox8"}],["path",{d:"m4 17 6-6-6-6",key:"1yngyt"}]]};tt.node;const Qt=E(tt);/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */const st={name:"trash",size:24,node:[["path",{d:"M10 11v6",key:"nco0om"}],["path",{d:"M14 11v6",key:"outv1u"}],["path",{d:"M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6",key:"miytrc"}],["path",{d:"M3 6h18",key:"d0wm0j"}],["path",{d:"M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2",key:"e791ji"}]],aliases:["trash-2"]};st.node;const me=E(st);/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */const nt={name:"users",size:24,node:[["path",{d:"M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2",key:"1yyitq"}],["path",{d:"M16 3.128a4 4 0 0 1 0 7.744",key:"16gr8j"}],["path",{d:"M22 21v-2a4 4 0 0 0-3-3.87",key:"kshegd"}],["circle",{cx:"9",cy:"7",r:"4",key:"nufk8"}]]};nt.node;const at=E(nt);/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */const rt={name:"utensils",size:24,node:[["path",{d:"M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2",key:"cjf0a3"}],["path",{d:"M7 2v20",key:"1473qp"}],["path",{d:"M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7",key:"j28e5"}]],aliases:["fork-knife"]};rt.node;const Jt=E(rt);/**
- * @license lucide-react v1.47.0 - ISC
+ * @license lucide-react v1.53.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
