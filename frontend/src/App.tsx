@@ -193,19 +193,33 @@ function MainScreen() {
         }
       }
 
-      // 2. Synchronize fridges list
-      try {
-        const syncedFridges = await storage.syncFridges();
-        if (!isCancelled && syncedFridges.length > 0) {
-          setFridges(syncedFridges);
-          const currentActive = storage.getActiveFridgeId();
-          const targetFridgeId =
-            syncedFridges.find((f) => f.id === currentActive)?.id || syncedFridges[0].id;
-          storage.setActiveFridgeId(targetFridgeId);
-          setActiveFridgeId(targetFridgeId);
+      // 2. Synchronize fridges list with automatic retry
+      const attemptSync = async () => {
+        try {
+          const syncedFridges = await storage.syncFridges();
+          if (!isCancelled && syncedFridges.length > 0) {
+            setFridges(syncedFridges);
+            const currentActive = storage.getActiveFridgeId();
+            const targetFridgeId =
+              syncedFridges.find((f) => f.id === currentActive)?.id || syncedFridges[0].id;
+            storage.setActiveFridgeId(targetFridgeId);
+            setActiveFridgeId(targetFridgeId);
+            return true;
+          }
+        } catch (e) {
+          logger.warn('STORAGE', `Failed syncing fridges: ${e instanceof Error ? e.message : String(e)}`);
         }
-      } catch (e) {
-        logger.warn('STORAGE', `Failed syncing fridges: ${e instanceof Error ? e.message : String(e)}`);
+        return false;
+      };
+
+      const success = await attemptSync();
+      if (!success && !isCancelled) {
+        // Retry after Telegram WebApp finishes handshake and populates initData
+        setTimeout(() => {
+          if (!isCancelled) {
+            attemptSync();
+          }
+        }, 1500);
       }
     }
 
@@ -218,14 +232,27 @@ function MainScreen() {
 
   const [isSyncing, setIsSyncing] = useState(false);
 
-  // Background refresh helper
+  // Background refresh helper: resolves active fridge if needed, then syncs products
   const refreshProducts = useCallback(async () => {
-    if (!activeFridgeId) return;
     setIsSyncing(true);
     try {
-      await storage.loadProducts(activeFridgeId, (serverProducts) => {
-        setProducts(serverProducts);
-      });
+      let targetId = activeFridgeId;
+      if (!targetId) {
+        const synced = await storage.syncFridges();
+        if (synced && synced.length > 0) {
+          targetId = synced[0].id;
+          setFridges(synced);
+          storage.setActiveFridgeId(targetId);
+          setActiveFridgeId(targetId);
+        }
+      }
+      if (targetId) {
+        await storage.loadProducts(targetId, (serverProducts) => {
+          setProducts(serverProducts);
+        });
+      }
+    } catch (e) {
+      logger.warn('STORAGE', `Refresh failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setTimeout(() => setIsSyncing(false), 500);
     }
@@ -273,14 +300,32 @@ function MainScreen() {
     setFridgeSelectorOpen(false);
   };
 
+  // Helper to ensure active fridge exists before mutation
+  const ensureActiveFridge = async (): Promise<string | null> => {
+    if (activeFridgeId) return activeFridgeId;
+    try {
+      const synced = await storage.syncFridges();
+      if (synced && synced.length > 0) {
+        const firstId = synced[0].id;
+        storage.setActiveFridgeId(firstId);
+        setActiveFridgeId(firstId);
+        setFridges(synced);
+        return firstId;
+      }
+    } catch {}
+    return null;
+  };
+
   // Handle adding new product
   const handleAddProduct = async (
     newProductData: Omit<ProductItem, 'id' | 'added_by' | 'updated_at'>
   ) => {
+    const targetFridgeId = await ensureActiveFridge();
+
     const newProduct: ProductItem = {
       ...newProductData,
       id: `prod-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      fridge_id: activeFridgeId || undefined,
+      fridge_id: targetFridgeId || undefined,
       added_by: user?.id || 1,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -288,8 +333,8 @@ function MainScreen() {
 
     setProducts((prev) => [newProduct, ...prev]);
 
-    if (activeFridgeId) {
-      await storage.addProduct(activeFridgeId, newProduct);
+    if (targetFridgeId) {
+      await storage.addProduct(targetFridgeId, newProduct);
     }
   };
 
@@ -301,8 +346,9 @@ function MainScreen() {
       )
     );
 
-    if (activeFridgeId) {
-      await storage.updateProduct(activeFridgeId, id, { status: newStatus });
+    const targetFridgeId = await ensureActiveFridge();
+    if (targetFridgeId) {
+      await storage.updateProduct(targetFridgeId, id, { status: newStatus });
     }
     logger.info('INVENTORY', `Item ${id} status changed to ${newStatus}`);
   };
@@ -318,8 +364,9 @@ function MainScreen() {
       )
     );
 
-    if (activeFridgeId) {
-      await storage.updateProduct(activeFridgeId, id, updates);
+    const targetFridgeId = await ensureActiveFridge();
+    if (targetFridgeId) {
+      await storage.updateProduct(targetFridgeId, id, updates);
     }
     logger.info('INVENTORY', `Item ${id} package opened, new expiry: ${updates.expires_at}`);
   };
@@ -341,9 +388,10 @@ function MainScreen() {
     );
     setCookModalOpen(false);
 
-    if (activeFridgeId) {
+    const targetFridgeId = await ensureActiveFridge();
+    if (targetFridgeId) {
       for (const pid of productIds) {
-        storage.updateProduct(activeFridgeId, pid, { status: 'consumed' }).catch(() => {});
+        storage.updateProduct(targetFridgeId, pid, { status: 'consumed' }).catch(() => {});
       }
     }
     logger.info('COOKING', `Consumed ${productIds.length} ingredients for recipe "${cookingRecipe?.title}"`);
@@ -352,8 +400,9 @@ function MainScreen() {
   // Permanently delete product
   const handleDeleteProduct = async (id: string) => {
     setProducts((prev) => prev.filter((p) => p.id !== id));
-    if (activeFridgeId) {
-      await storage.deleteProduct(activeFridgeId, id);
+    const targetFridgeId = await ensureActiveFridge();
+    if (targetFridgeId) {
+      await storage.deleteProduct(targetFridgeId, id);
     }
     logger.info('INVENTORY', `Item ${id} permanently removed`);
   };
@@ -717,7 +766,9 @@ function MainScreen() {
           }}
           className="inline-flex items-center gap-1.5 text-[11px] font-mono text-[#8FA39D]/40 hover:text-[#8FA39D] active:scale-95 transition-all"
         >
-          <span>Свежесть v1.0 • D1 Connected</span>
+          <span>
+            {activeFridgeId ? 'Свежесть v1.1 • Облако подключено 🌿' : 'Свежесть v1.1 • Автономный режим ⚡'}
+          </span>
         </button>
       </footer>
 

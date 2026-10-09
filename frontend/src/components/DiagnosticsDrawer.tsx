@@ -4,6 +4,8 @@ import { logger, type LogEntry } from '@/lib/logger';
 import { haptic } from '@/lib/haptics';
 import { safeCopyToClipboard } from '@/lib/clipboard';
 import { Copy, Trash2, Check, Terminal } from 'lucide-react';
+import { storage } from '@/lib/storage';
+import { getApiUrl } from '@/lib/api';
 
 interface DiagnosticsDrawerProps {
   open: boolean;
@@ -44,6 +46,8 @@ export const DiagnosticsDrawer: React.FC<DiagnosticsDrawerProps> = ({ open, onOp
   };
 
   const tg = typeof window !== 'undefined' ? window.Telegram?.WebApp : undefined;
+  const activeFridgeId = storage.getActiveFridgeId();
+  const hasInitData = Boolean(tg?.initData);
 
   return (
     <Drawer.Root open={open} onOpenChange={onOpenChange}>
@@ -71,18 +75,24 @@ export const DiagnosticsDrawer: React.FC<DiagnosticsDrawerProps> = ({ open, onOp
               <span className="text-[#A7C7E7]">{tg?.platform || 'browser'}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-[#8FA39D]">Telegram SDK:</span>
-              <span>v{tg?.version || 'N/A'}</span>
-            </div>
-            <div className="flex justify-between">
               <span className="text-[#8FA39D]">Telegram User ID:</span>
               <span className="text-[#EBAEB7]">{tg?.initDataUnsafe?.user?.id || 'не авторизован'}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-[#8FA39D]">CloudStorage:</span>
-              <span className={tg?.CloudStorage ? 'text-[#5E8B7E]' : 'text-[#EBAEB7]'}>
-                {tg?.CloudStorage ? 'доступно (активно)' : 'не поддерживается'}
+              <span className="text-[#8FA39D]">Telegram initData:</span>
+              <span className={hasInitData ? 'text-[#5E8B7E]' : 'text-[#EBAEB7]'}>
+                {hasInitData ? 'Присутствует (OK)' : 'ОТСУТСТВУЕТ'}
               </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-[#8FA39D]">Активный Fridge ID:</span>
+              <span className={activeFridgeId ? 'text-[#5E8B7E] truncate max-w-[170px]' : 'text-[#EBAEB7]'}>
+                {activeFridgeId || 'Не привязан'}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-[#8FA39D]">Cloud D1 API:</span>
+              <span className="text-[#8FA39D] truncate max-w-[170px]">{getApiUrl('/fridges/my')}</span>
             </div>
           </div>
 

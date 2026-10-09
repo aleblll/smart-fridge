@@ -1004,7 +1004,8 @@ export default {
         return jsonResponse({ error: 'Bot token not configured on server', code: 'SERVER_MISCONFIG' }, 500, corsHeaders);
       }
 
-      const authResult = await verifyTelegramAuth(initDataRaw, botToken);
+      const maxAuthAge = env.ENVIRONMENT === 'test' ? 3600 : 86400 * 7;
+      const authResult = await verifyTelegramAuth(initDataRaw, botToken, maxAuthAge);
       if (authResult.error === 'AUTH_EXPIRED') {
         return jsonResponse({ error: 'Auth date expired', code: 'AUTH_EXPIRED' }, 401, corsHeaders);
       }
@@ -1037,11 +1038,14 @@ export default {
       return jsonResponse({ error: 'Bot token not configured on server', code: 'SERVER_MISCONFIG' }, 500, corsHeaders);
     }
 
-    const authResult = await verifyTelegramAuth(initDataHeader, botToken);
+    const maxAuthAge = env.ENVIRONMENT === 'test' ? 3600 : 86400 * 7;
+    const authResult = await verifyTelegramAuth(initDataHeader, botToken, maxAuthAge);
     if (authResult.error === 'AUTH_EXPIRED') {
+      console.warn('[Worker Auth] 401 AUTH_EXPIRED for user request');
       return jsonResponse({ error: 'Unauthorized: auth date expired', code: 'AUTH_EXPIRED' }, 401, corsHeaders);
     }
     if (!authResult.user || typeof authResult.user.id !== 'number') {
+      console.warn('[Worker Auth] 401 INVALID_SIGNATURE for user request');
       return jsonResponse({ error: 'Unauthorized: invalid HMAC signature', code: 'INVALID_SIGNATURE' }, 401, corsHeaders);
     }
 
