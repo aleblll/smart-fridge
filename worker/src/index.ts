@@ -982,6 +982,75 @@ export default {
     }
 
     // ==========================================
+    // Telegram Bot Webhook (handles /start & chat messages)
+    // ==========================================
+    if (request.method === 'POST' && (normalizedPath === '/api/telegram-webhook' || normalizedPath === '/telegram-webhook')) {
+      try {
+        const update = await request.json() as any;
+        const message = update?.message;
+        if (message && message.chat && message.chat.id) {
+          const chatId = message.chat.id;
+          const fromUser = message.from;
+          const token = env.TELEGRAM_BOT_TOKEN;
+
+          // If user interacted, pre-create default fridge in D1 if not existing
+          if (fromUser?.id && db) {
+            try {
+              const existingMember = await db.prepare(
+                'SELECT fridge_id FROM fridge_members WHERE user_id = ?'
+              ).bind(fromUser.id).first<any>();
+              if (!existingMember) {
+                const newFridgeId = crypto.randomUUID();
+                const now = new Date().toISOString();
+                await db.prepare('INSERT INTO fridges (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)').bind(
+                  newFridgeId,
+                  'Мой холодильник',
+                  now,
+                  now
+                ).run();
+                await db.prepare('INSERT INTO fridge_members (fridge_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)').bind(
+                  newFridgeId,
+                  fromUser.id,
+                  'owner',
+                  now
+                ).run();
+              }
+            } catch (dbErr) {
+              console.warn('[Webhook] DB pre-init error:', dbErr);
+            }
+          }
+
+          if (token) {
+            const appUrl = 'https://aleblll.github.io/smart-fridge/?v=1.1.0';
+            const welcomeText = 'Привет! Я «Свежесть» — умный контроль продуктов и срока годности 🌿\n\nНажми кнопку ниже, чтобы открыть холодильник и синхронизировать продукты:';
+
+            await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                chat_id: chatId,
+                text: welcomeText,
+                reply_markup: {
+                  inline_keyboard: [
+                    [
+                      {
+                        text: '🌿 Открыть Холодильник',
+                        web_app: { url: appUrl }
+                      }
+                    ]
+                  ]
+                }
+              })
+            });
+          }
+        }
+      } catch (e) {
+        console.error('Webhook error:', e);
+      }
+      return jsonResponse({ ok: true }, 200, corsHeaders);
+    }
+
+    // ==========================================
     // 2. Route: POST /api/auth/validate
     // ==========================================
     if (request.method === 'POST' && normalizedPath === '/api/auth/validate') {

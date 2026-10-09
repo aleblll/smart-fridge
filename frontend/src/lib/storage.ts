@@ -132,6 +132,22 @@ export const storage = {
       addItems(localStorage.getItem(LEGACY_STORAGE_KEY));
       addItems(localStorage.getItem(LEGACY_FALLBACK_KEY));
 
+      // Scan all potential localStorage keys for products
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (key.startsWith('smart_fridge') || key.includes('product') || key.includes('inventory'))) {
+          if (
+            key === STORAGE_ACTIVE_FRIDGE_KEY ||
+            key === STORAGE_FRIDGES_LIST_KEY ||
+            key === STORAGE_MUTATION_QUEUE_KEY ||
+            key.includes('log')
+          ) {
+            continue;
+          }
+          addItems(localStorage.getItem(key));
+        }
+      }
+
       // Filter out demo products so we only migrate real user products
       return candidates.filter((item) => !item.id.startsWith('demo-'));
     } catch {
@@ -159,6 +175,28 @@ export const storage = {
       if (legacy) {
         const parsed = JSON.parse(legacy);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+
+      // Scan all other potential keys for non-empty items
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (key.startsWith('smart_fridge') || key.includes('product') || key.includes('inventory'))) {
+          if (
+            key === STORAGE_ACTIVE_FRIDGE_KEY ||
+            key === STORAGE_FRIDGES_LIST_KEY ||
+            key === STORAGE_MUTATION_QUEUE_KEY ||
+            key.includes('log')
+          ) {
+            continue;
+          }
+          const raw = localStorage.getItem(key);
+          if (raw) {
+            try {
+              const parsed = JSON.parse(raw);
+              if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+            } catch {}
+          }
+        }
       }
 
       // If target key was explicitly set as empty array
