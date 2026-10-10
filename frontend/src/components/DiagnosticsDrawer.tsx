@@ -5,7 +5,8 @@ import { haptic } from '@/lib/haptics';
 import { safeCopyToClipboard } from '@/lib/clipboard';
 import { Copy, Trash2, Check, Terminal } from 'lucide-react';
 import { storage } from '@/lib/storage';
-import { getApiUrl } from '@/lib/api';
+import { getApiUrl, getTelegramInitData, api } from '@/lib/api';
+import { Bell, RefreshCw } from 'lucide-react';
 
 interface DiagnosticsDrawerProps {
   open: boolean;
@@ -15,6 +16,8 @@ interface DiagnosticsDrawerProps {
 export const DiagnosticsDrawer: React.FC<DiagnosticsDrawerProps> = ({ open, onOpenChange }) => {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [copied, setCopied] = useState(false);
+  const [testSending, setTestSending] = useState(false);
+  const [testResult, setTestResult] = useState<string | null>(null);
 
   useEffect(() => {
     setLogs(logger.getLogs());
@@ -45,9 +48,53 @@ export const DiagnosticsDrawer: React.FC<DiagnosticsDrawerProps> = ({ open, onOp
     logger.clear();
   };
 
+  const handleTestNotification = async () => {
+    haptic.impact('medium');
+    setTestSending(true);
+    setTestResult(null);
+    try {
+      logger.info('DIAGNOSTICS', 'Sending test Telegram notification...');
+      const res = await api.sendTestNotification();
+      if (res.success && res.data?.delivered) {
+        haptic.notification('success');
+        setTestResult(`Отправлено! (${res.data.itemsCount} продуктов)`);
+        logger.info('DIAGNOSTICS', `Notification delivered to Telegram chat. Items: ${res.data.itemsCount}`);
+      } else {
+        haptic.notification('error');
+        setTestResult(`Ошибка: ${res.error || 'Сбой отправки'}`);
+        logger.error('DIAGNOSTICS', `Failed to send notification: ${res.error}`);
+      }
+    } catch (err) {
+      haptic.notification('error');
+      setTestResult('Сетевая ошибка');
+      logger.error('DIAGNOSTICS', `Test notification exception: ${err}`);
+    } finally {
+      setTestSending(false);
+    }
+  };
+
+  const handleManualSync = async () => {
+    haptic.impact('medium');
+    logger.info('DIAGNOSTICS', 'Manual D1 sync triggered...');
+    try {
+      const fridges = await storage.syncFridges();
+      if (fridges.length > 0) {
+        haptic.notification('success');
+        logger.sync(`Manual sync success: found ${fridges.length} fridges`);
+      } else {
+        haptic.notification('warning');
+        logger.warn('DIAGNOSTICS', 'Manual sync returned 0 fridges');
+      }
+    } catch (err) {
+      haptic.notification('error');
+      logger.error('DIAGNOSTICS', `Manual sync error: ${err}`);
+    }
+  };
+
   const tg = typeof window !== 'undefined' ? window.Telegram?.WebApp : undefined;
   const activeFridgeId = storage.getActiveFridgeId();
-  const hasInitData = Boolean(tg?.initData);
+  const initDataStr = getTelegramInitData();
+  const hasInitData = Boolean(initDataStr);
 
   return (
     <Drawer.Root open={open} onOpenChange={onOpenChange}>
@@ -95,6 +142,34 @@ export const DiagnosticsDrawer: React.FC<DiagnosticsDrawerProps> = ({ open, onOp
               <span className="text-[#8FA39D] truncate max-w-[170px]">{getApiUrl('/fridges/my')}</span>
             </div>
           </div>
+
+          {/* Test and Actions */}
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={handleTestNotification}
+              disabled={testSending}
+              className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-amber-500/20 border border-amber-500/30 hover:bg-amber-500/30 text-amber-200 text-xs font-medium active:scale-95 transition-all disabled:opacity-50"
+            >
+              <Bell className="w-3.5 h-3.5" />
+              <span>{testSending ? 'Отправка...' : 'Тест пуша 🔔'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleManualSync}
+              className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-[#5E8B7E]/20 border border-[#5E8B7E]/30 hover:bg-[#5E8B7E]/30 text-[#A7C7E7] text-xs font-medium active:scale-95 transition-all"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Синхронизация 🔄</span>
+            </button>
+          </div>
+
+          {testResult && (
+            <div className="text-center text-xs font-mono p-1.5 rounded-lg bg-black/40 text-amber-200">
+              {testResult}
+            </div>
+          )}
 
           {/* Action buttons */}
           <div className="flex items-center gap-2">

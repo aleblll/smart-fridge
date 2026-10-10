@@ -10,7 +10,7 @@ import { DiagnosticsDrawer } from '@/components/DiagnosticsDrawer';
 import { storage } from '@/lib/storage';
 import { api } from '@/lib/api';
 import { logger } from '@/lib/logger';
-import { calculateFreshnessMetrics } from '@/lib/freshness';
+import { calculateFreshnessMetrics, autoDiscardExpiredProducts } from '@/lib/freshness';
 import type { ProductItem, StorageType, ProductStatus, FridgeSummary } from '@/types';
 import {
   Plus,
@@ -120,10 +120,39 @@ function MainScreen() {
     }, 3500);
   }, []);
 
-  // Products state initialized from local cache
+  // Helper to safely set products and automatically discard expired items
+  const applyProductsWithAutoDiscard = useCallback(
+    (rawProducts: ProductItem[], targetFridgeId?: string | null): ProductItem[] => {
+      const { updated, discardedCount } = autoDiscardExpiredProducts(rawProducts);
+
+      if (discardedCount > 0) {
+        logger.info('INVENTORY', `Auto-discarded ${discardedCount} expired items to Утиль`);
+        if (targetFridgeId) {
+          storage.saveProductsLocally(targetFridgeId, updated);
+          for (const item of updated) {
+            if (item.status === 'discarded') {
+              const orig = rawProducts.find((p) => p.id === item.id);
+              if (orig && orig.status === 'active') {
+                storage.updateProduct(targetFridgeId, item.id, { status: 'discarded' }).catch(() => {});
+              }
+            }
+          }
+        }
+      }
+
+      return updated;
+    },
+    []
+  );
+
+  // Products state initialized from local cache with auto-discard of expired products
   const [products, setProducts] = useState<ProductItem[]>(() => {
     const cached = storage.getInitialProducts(storage.getActiveFridgeId() || undefined);
-    return cached !== null ? cached : INITIAL_DEMO_PRODUCTS;
+    if (cached !== null) {
+      const { updated } = autoDiscardExpiredProducts(cached);
+      return updated;
+    }
+    return INITIAL_DEMO_PRODUCTS;
   });
 
   const activeFridge = useMemo(() => {
@@ -166,10 +195,10 @@ function MainScreen() {
 
   // App Initialization:
   // 1. Process Telegram start_param invite code
-  // 2. Sync fridges list from D1
+  // 2. Sync fridges list from D1 with persistent multi-tier retry
   // 3. Load active fridge products (Thin Client + Offline Cache)
   useEffect(() => {
-    let isCancelled = false;
+    let unmounted = false;
 
     async function initializeApp() {
       // 1. Check for invite code in Telegram start_param
@@ -180,7 +209,7 @@ function MainScreen() {
           logger.info('INVITE', `Claiming invite code from start_param: ${inviteCode}`);
           try {
             const claimRes = await api.claimInvite(inviteCode);
-            if (!isCancelled && claimRes.success && claimRes.data?.fridge_id) {
+            if (!unmounted && claimRes.success && claimRes.data?.fridge_id) {
               const joinedFridgeId = claimRes.data.fridge_id;
               storage.setActiveFridgeId(joinedFridgeId);
               setActiveFridgeId(joinedFridgeId);
@@ -193,42 +222,41 @@ function MainScreen() {
         }
       }
 
-      // 2. Synchronize fridges list with automatic retry
-      const attemptSync = async () => {
+      // 2. Synchronize fridges list with persistent multi-tier backoff
+      const delays = [0, 400, 1200, 2500, 5000];
+      for (const delay of delays) {
+        if (unmounted) break;
+        if (delay > 0) {
+          await new Promise((r) => setTimeout(r, delay));
+        }
+        if (unmounted) break;
+
         try {
           const syncedFridges = await storage.syncFridges();
-          if (!isCancelled && syncedFridges.length > 0) {
-            setFridges(syncedFridges);
-            const currentActive = storage.getActiveFridgeId();
-            const targetFridgeId =
-              syncedFridges.find((f) => f.id === currentActive)?.id || syncedFridges[0].id;
-            storage.setActiveFridgeId(targetFridgeId);
-            setActiveFridgeId(targetFridgeId);
-            return true;
+          if (syncedFridges && syncedFridges.length > 0) {
+            if (!unmounted) {
+              setFridges(syncedFridges);
+              const currentActive = storage.getActiveFridgeId();
+              const targetFridgeId =
+                syncedFridges.find((f) => f.id === currentActive)?.id || syncedFridges[0].id;
+              storage.setActiveFridgeId(targetFridgeId);
+              setActiveFridgeId(targetFridgeId);
+              logger.info('STORAGE', `Attached to active fridge: ${targetFridgeId}`);
+            }
+            break;
           }
         } catch (e) {
-          logger.warn('STORAGE', `Failed syncing fridges: ${e instanceof Error ? e.message : String(e)}`);
+          logger.warn('STORAGE', `Sync attempt at +${delay}ms failed: ${e instanceof Error ? e.message : String(e)}`);
         }
-        return false;
-      };
-
-      const success = await attemptSync();
-      if (!success && !isCancelled) {
-        // Retry after Telegram WebApp finishes handshake and populates initData
-        setTimeout(() => {
-          if (!isCancelled) {
-            attemptSync();
-          }
-        }, 1500);
       }
     }
 
     initializeApp();
 
     return () => {
-      isCancelled = true;
+      unmounted = true;
     };
-  }, [haptic, showToast]);
+  }, []);
 
   const [isSyncing, setIsSyncing] = useState(false);
 
@@ -248,7 +276,8 @@ function MainScreen() {
       }
       if (targetId) {
         await storage.loadProducts(targetId, (serverProducts) => {
-          setProducts(serverProducts);
+          const processed = applyProductsWithAutoDiscard(serverProducts, targetId);
+          setProducts(processed);
         });
       }
     } catch (e) {
@@ -256,21 +285,22 @@ function MainScreen() {
     } finally {
       setTimeout(() => setIsSyncing(false), 500);
     }
-  }, [activeFridgeId]);
+  }, [activeFridgeId, applyProductsWithAutoDiscard]);
 
   // Load products when activeFridgeId changes
   useEffect(() => {
     if (!activeFridgeId) return;
 
-    // 1. Instant render from local cache
+    // 1. Instant render from local cache with auto-discard
     const cached = storage.getInitialProducts(activeFridgeId);
     if (cached !== null) {
-      setProducts(cached);
+      const processed = applyProductsWithAutoDiscard(cached, activeFridgeId);
+      setProducts(processed);
     }
 
     // 2. Background sync to D1 server
     refreshProducts();
-  }, [activeFridgeId, refreshProducts]);
+  }, [activeFridgeId, refreshProducts, applyProductsWithAutoDiscard]);
 
   // Auto-refresh when app window regains focus or comes into foreground
   useEffect(() => {

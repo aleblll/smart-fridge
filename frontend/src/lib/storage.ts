@@ -241,28 +241,26 @@ export const storage = {
         let serverProducts = res.data.products;
         logger.sync(`Loaded ${serverProducts.length} products from D1 for fridge ${fridgeId}`);
 
-        // Migration Check: If D1 server has 0 products for this fridge,
-        // but user has existing products from local cache / legacy storage,
-        // automatically push them up to D1 so they persist in cloud and sync across devices!
-        if (serverProducts.length === 0) {
-          const localToMigrate = this.getLocalProductsForMigration(fridgeId);
-          if (localToMigrate.length > 0) {
-            logger.info('MIGRATION', `Auto-migrating ${localToMigrate.length} local items to D1 server...`);
-            const migrated: ProductItem[] = [];
-            for (const item of localToMigrate) {
-              try {
-                const addRes = await api.addProduct(fridgeId, item);
-                if (addRes.success && addRes.data?.product) {
-                  migrated.push(addRes.data.product);
-                } else {
-                  migrated.push(item);
-                }
-              } catch {
-                migrated.push(item);
+        // Migration & Merge Check:
+        // 1. If server has 0 products, push all local products to D1
+        // 2. If server already has products, find any unique local products not yet on server and push them up
+        const localCandidates = this.getLocalProductsForMigration(fridgeId);
+        const serverIdSet = new Set(serverProducts.map((p) => p.id));
+        const unsyncedLocals = localCandidates.filter((p) => !serverIdSet.has(p.id));
+
+        if (unsyncedLocals.length > 0) {
+          logger.info('MIGRATION', `Syncing ${unsyncedLocals.length} local items to D1 server for fridge ${fridgeId}...`);
+          for (const item of unsyncedLocals) {
+            try {
+              const addRes = await api.addProduct(fridgeId, item);
+              if (addRes.success && addRes.data?.product) {
+                serverProducts.push(addRes.data.product);
+                serverIdSet.add(addRes.data.product.id);
+              } else {
+                serverProducts.push(item);
               }
-            }
-            if (migrated.length > 0) {
-              serverProducts = migrated;
+            } catch {
+              serverProducts.push(item);
             }
           }
         }

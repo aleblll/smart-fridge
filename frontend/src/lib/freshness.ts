@@ -1,3 +1,5 @@
+import type { ProductItem } from '@/types';
+
 /**
  * Calculates freshness ratio and spent percentage according to DS-001 Tokens specification
  * Eliminates timezone discrepancy by calculating calendar days in UTC.
@@ -73,4 +75,37 @@ export function calculateFreshnessMetrics(
     statusTag: 'fresh',
     statusLabel: `Осталось: ${daysLeft} дн`,
   };
+}
+
+/**
+ * Automatically transitions active products that are past expiry (daysLeft < 0) into 'discarded' (Утиль)
+ */
+export function autoDiscardExpiredProducts(items: ProductItem[]): {
+  updated: ProductItem[];
+  discardedCount: number;
+} {
+  let discardedCount = 0;
+  const now = new Date();
+  const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+
+  const updated = items.map((item) => {
+    if (item.status === 'active' && item.expires_at) {
+      const [y, m, d] = item.expires_at.split('-').map(Number);
+      if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+        const expUtc = Date.UTC(y, m - 1, d);
+        const daysLeft = Math.round((expUtc - todayUtc) / 86400000);
+        if (daysLeft < 0) {
+          discardedCount++;
+          return {
+            ...item,
+            status: 'discarded' as const,
+            updated_at: new Date().toISOString(),
+          };
+        }
+      }
+    }
+    return item;
+  });
+
+  return { updated, discardedCount };
 }

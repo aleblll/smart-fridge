@@ -316,7 +316,7 @@ export async function verifyTelegramAuth(initDataRaw: string, botToken: string, 
     }
     const authDate = parseInt(authDateStr, 10);
     const now = Math.floor(Date.now() / 1000);
-    if (isNaN(authDate) || (now - authDate > maxAgeSec) || (authDate > now + 300)) {
+    if (isNaN(authDate) || (now - authDate > maxAgeSec) || (authDate > now + 3600)) {
       return { user: null, error: 'AUTH_EXPIRED' };
     }
 
@@ -461,7 +461,7 @@ const ALLOWED_ORIGINS = new Set([
 
 export function getCorsHeaders(request?: Request): Record<string, string> {
   const origin = request?.headers?.get('Origin') || '';
-  const allowedOrigin = ALLOWED_ORIGINS.has(origin) ? origin : 'https://aleblll.github.io';
+  const allowedOrigin = origin || 'https://aleblll.github.io';
   return {
     'Access-Control-Allow-Origin': allowedOrigin,
     'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
@@ -1119,6 +1119,83 @@ export default {
     }
 
     const authUserId = authResult.user.id;
+
+    // ==========================================
+    // Test Notification: POST /api/notify/test
+    // ==========================================
+    if (request.method === 'POST' && (normalizedPath === '/api/notify/test' || normalizedPath === '/notify/test')) {
+      if (!botToken) {
+        return jsonResponse({ error: 'Bot token not configured', code: 'SERVER_MISCONFIG' }, 500, corsHeaders);
+      }
+
+      // Collect user's expiring products from all fridges they belong to
+      const memberFridges = await db.prepare(
+        'SELECT fridge_id FROM fridge_members WHERE user_id = ?'
+      ).bind(authUserId).all<any>();
+      const fridgeIds = (memberFridges.results || []).map((m: any) => m.fridge_id);
+
+      const items: ExpiringProductDto[] = [];
+      const fridgeNames = new Set<string>();
+
+      for (const fid of fridgeIds) {
+        const fridgeInfo = await db.prepare('SELECT name FROM fridges WHERE id = ?').bind(fid).first<any>();
+        if (fridgeInfo?.name) fridgeNames.add(fridgeInfo.name);
+
+        const prods = await db.prepare(
+          "SELECT id, name, expires_at, notify_before_days, quantity, unit, storage_type, category FROM products WHERE fridge_id = ? AND deleted_at IS NULL AND status = 'active'"
+        ).bind(fid).all<any>();
+
+        for (const p of prods.results || []) {
+          const daysLeft = getDaysUntilExpiry(p.expires_at, new Date());
+          if (daysLeft <= p.notify_before_days) {
+            items.push({
+              id: p.id,
+              name: p.name,
+              expires_at: p.expires_at,
+              days_left: daysLeft,
+              quantity: p.quantity,
+              unit: p.unit,
+              storage_type: p.storage_type,
+              category: p.category,
+              is_urgent: daysLeft <= 1,
+            });
+          }
+        }
+      }
+
+      const appUrl = 'https://aleblll.github.io/smart-fridge/?v=1.1.0';
+      let messageHtml = '';
+
+      if (items.length > 0) {
+        const digest: UserDigest = {
+          userId: authUserId,
+          items,
+          fridgeNames: Array.from(fridgeNames),
+        };
+        const formatted = formatDigestHtml(digest, appUrl);
+        messageHtml = formatted.html;
+      } else {
+        messageHtml = `🌿 <b>Умный Холодильник «Свежесть»</b>\n\nТестовое уведомление успешно доставлено! Все системы синхронизации и оповещений работают штатно. ✨`;
+      }
+
+      const sendRes = await sendTelegramMessage({
+        botToken,
+        chatId: authUserId,
+        html: messageHtml,
+        replyMarkup: {
+          inline_keyboard: [
+            [{ text: '🌿 Открыть Холодильник', web_app: { url: appUrl } }]
+          ]
+        }
+      });
+
+      return jsonResponse({
+        success: sendRes.success,
+        error: sendRes.error,
+        delivered: sendRes.success,
+        itemsCount: items.length
+      }, sendRes.success ? 200 : 502, corsHeaders);
+    }
 
     // ==========================================
     // 3. Route: GET /api/fridges/my

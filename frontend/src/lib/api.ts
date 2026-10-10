@@ -6,32 +6,65 @@ import type {
   ClaimResult,
   ProductItem,
 } from '@/types';
+import { logger } from '@/lib/logger';
+
+const CACHED_INIT_DATA_KEY = 'smart_fridge_cached_init_data';
 
 /**
- * Retrieves raw Telegram initData string for authorization
+ * Retrieves raw Telegram initData string for authorization with session persistence
  */
 export function getTelegramInitData(): string {
-  if (typeof window !== 'undefined') {
-    if (window.Telegram?.WebApp?.initData) {
-      return window.Telegram.WebApp.initData;
-    }
+  if (typeof window === 'undefined') return '';
+
+  let found = '';
+
+  // 1. Native Telegram.WebApp
+  if (window.Telegram?.WebApp?.initData) {
+    found = window.Telegram.WebApp.initData;
+  }
+
+  // 2. Query / Hash parameters
+  if (!found) {
     try {
       const urlParams = new URLSearchParams(window.location.search);
       const tgInitData = urlParams.get('tgWebAppData');
-      if (tgInitData) return tgInitData;
-      const hashParams = new URLSearchParams(window.location.hash.slice(1));
-      const hashInitData = hashParams.get('tgWebAppData');
-      if (hashInitData) return hashInitData;
+      if (tgInitData) found = tgInitData;
+
+      if (!found) {
+        const hashParams = new URLSearchParams(window.location.hash.slice(1));
+        const hashInitData = hashParams.get('tgWebAppData');
+        if (hashInitData) found = hashInitData;
+      }
     } catch {}
   }
+
+  // 3. Cache persistence
+  if (found) {
+    try {
+      sessionStorage.setItem(CACHED_INIT_DATA_KEY, found);
+      localStorage.setItem(CACHED_INIT_DATA_KEY, found);
+    } catch {}
+    return found;
+  }
+
+  // 4. Fallback to cached value from current session
+  try {
+    const sessionCached = sessionStorage.getItem(CACHED_INIT_DATA_KEY);
+    if (sessionCached) return sessionCached;
+    const localCached = localStorage.getItem(CACHED_INIT_DATA_KEY);
+    if (localCached) return localCached;
+  } catch {}
+
   return '';
 }
 
 /**
- * Normalizes API endpoint URL ensuring /api prefix is always present
+ * Normalizes API endpoint URL ensuring /api prefix is always present.
+ * Defaults to live Cloudflare Worker URL to guarantee connectivity.
  */
 export function getApiUrl(endpoint: string): string {
-  const base = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/+$/, '');
+  const defaultWorkerApi = 'https://smart-fridge-edge-gateway.alexeyberezin2.workers.dev/api';
+  const base = (import.meta.env.VITE_API_BASE_URL || defaultWorkerApi).replace(/\/+$/, '');
   const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
 
   if (base.endsWith('/api') && cleanEndpoint.startsWith('/api')) {
@@ -64,6 +97,8 @@ async function request<T>(
     ...options.headers,
   };
 
+  logger.info('API', `--> ${options.method || 'GET'} ${url} (hasInitData: ${Boolean(initData)})`);
+
   try {
     const response = await fetch(url, {
       ...options,
@@ -73,21 +108,26 @@ async function request<T>(
     const data = await response.json().catch(() => null);
 
     if (!response.ok) {
+      const errMsg = data?.error || `HTTP error ${response.status}: ${response.statusText}`;
+      logger.error('API', `<-- ${response.status} ${url}: ${errMsg}`);
       return {
         success: false,
-        error: data?.error || `HTTP error ${response.status}: ${response.statusText}`,
+        error: errMsg,
         code: data?.code || `HTTP_${response.status}`,
       };
     }
 
+    logger.info('API', `<-- ${response.status} ${url}`);
     return {
       success: true,
       data: data as T,
     };
   } catch (error) {
+    const netErr = error instanceof Error ? error.message : 'Network request failed';
+    logger.error('API', `<-- Network Exception ${url}: ${netErr}`);
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Network request failed',
+      error: netErr,
       code: 'NETWORK_ERROR',
     };
   }
@@ -204,6 +244,16 @@ export const api = {
    */
   async claimInvite(code: string): Promise<ApiResponse<ClaimResult>> {
     return request<ClaimResult>(`/invites/${encodeURIComponent(code)}/claim`, {
+      method: 'POST',
+    });
+  },
+
+  /**
+   * Send test morning notification to user's Telegram chat
+   * POST /api/notify/test
+   */
+  async sendTestNotification(): Promise<ApiResponse<{ delivered: boolean; itemsCount: number }>> {
+    return request<{ delivered: boolean; itemsCount: number }>('/notify/test', {
       method: 'POST',
     });
   },
