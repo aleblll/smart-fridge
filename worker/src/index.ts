@@ -954,6 +954,38 @@ export default {
     const botToken = (env.TELEGRAM_BOT_TOKEN || (env as any).BOT_TOKEN || '').trim();
 
     // ==========================================
+    // Health Check & Automatic Webhook Setup
+    // ==========================================
+    if (normalizedPath === '/api/health' || normalizedPath === '/health') {
+      return jsonResponse({
+        status: 'ok',
+        version: '1.1.0',
+        subdomain: url.host,
+        hasBotToken: Boolean(botToken),
+        hasDb: Boolean(db),
+        time: new Date().toISOString()
+      }, 200, corsHeaders);
+    }
+
+    if (normalizedPath === '/api/webhook/setup' || normalizedPath === '/webhook/setup') {
+      if (!botToken) {
+        return jsonResponse({ error: 'Bot token missing on server' }, 500, corsHeaders);
+      }
+      const webhookUrl = `https://${url.host}/api/telegram-webhook`;
+      try {
+        const tgRes = await fetch(`https://api.telegram.org/bot${botToken}/setWebhook?url=${encodeURIComponent(webhookUrl)}`);
+        const tgData = await tgRes.json();
+        return jsonResponse({
+          success: true,
+          webhookUrl,
+          telegramResponse: tgData
+        }, 200, corsHeaders);
+      } catch (err: any) {
+        return jsonResponse({ error: err.message, webhookUrl }, 502, corsHeaders);
+      }
+    }
+
+    // ==========================================
     // 1. Route: GET/POST /api/cron/notify (Closed by default)
     // ==========================================
     if (normalizedPath === '/api/cron/notify') {
