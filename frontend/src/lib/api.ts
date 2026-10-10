@@ -58,15 +58,17 @@ export function getTelegramInitData(): string {
   return '';
 }
 
-/**
- * Normalizes API endpoint URL ensuring /api prefix is always present.
- * Defaults to live Cloudflare Worker URL to guarantee connectivity.
- */
-export function getApiUrl(endpoint: string): string {
-  const defaultWorkerApi = 'https://smart-fridge-edge-gateway.alexeyberezin2.workers.dev/api';
-  const base = (import.meta.env.VITE_API_BASE_URL || defaultWorkerApi).replace(/\/+$/, '');
-  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+export const PRIMARY_WORKER_API = 'https://smart-fridge-edge-gateway.aghaskdbbb.workers.dev/api';
+export const FALLBACK_WORKER_API = 'https://smart-fridge-edge-gateway.alexeyberezin2.workers.dev/api';
 
+let activeBaseUrl = (import.meta.env.VITE_API_BASE_URL || PRIMARY_WORKER_API).replace(/\/+$/, '');
+
+export function getApiBaseUrl(): string {
+  return activeBaseUrl;
+}
+
+export function buildUrl(base: string, endpoint: string): string {
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
   if (base.endsWith('/api') && cleanEndpoint.startsWith('/api')) {
     return `${base}${cleanEndpoint.slice(4)}`;
   }
@@ -77,15 +79,20 @@ export function getApiUrl(endpoint: string): string {
 }
 
 /**
- * Base fetch wrapper with Telegram WebApp Authorization headers
+ * Normalizes API endpoint URL ensuring /api prefix is always present.
+ */
+export function getApiUrl(endpoint: string): string {
+  return buildUrl(activeBaseUrl, endpoint);
+}
+
+/**
+ * Base fetch wrapper with Telegram WebApp Authorization headers and resilient dual-gateway fallback
  */
 async function request<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> {
   const initData = getTelegramInitData();
-  const url = getApiUrl(endpoint);
-
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
     ...(initData
@@ -97,14 +104,13 @@ async function request<T>(
     ...options.headers,
   };
 
-  logger.info('API', `--> ${options.method || 'GET'} ${url} (hasInitData: ${Boolean(initData)})`);
-
-  try {
+  const executeFetch = async (targetBase: string) => {
+    const url = buildUrl(targetBase, endpoint);
+    logger.info('API', `--> ${options.method || 'GET'} ${url} (hasInitData: ${Boolean(initData)})`);
     const response = await fetch(url, {
       ...options,
       headers,
     });
-
     const data = await response.json().catch(() => null);
 
     if (!response.ok) {
@@ -118,13 +124,31 @@ async function request<T>(
     }
 
     logger.info('API', `<-- ${response.status} ${url}`);
+    activeBaseUrl = targetBase;
     return {
       success: true,
       data: data as T,
     };
+  };
+
+  try {
+    return await executeFetch(activeBaseUrl);
   } catch (error) {
+    // If activeBaseUrl failed with a network error and it was primary, attempt fallback immediately!
+    if (activeBaseUrl !== FALLBACK_WORKER_API) {
+      logger.warn('API', `Primary gateway unreachable (${activeBaseUrl}), attempting fallback to ${FALLBACK_WORKER_API}...`);
+      try {
+        const fallbackRes = await executeFetch(FALLBACK_WORKER_API);
+        activeBaseUrl = FALLBACK_WORKER_API;
+        return fallbackRes;
+      } catch (fallbackErr) {
+        const netErr = fallbackErr instanceof Error ? fallbackErr.message : 'Fallback request failed';
+        logger.error('API', `<-- Fallback network error: ${netErr}`);
+      }
+    }
+
     const netErr = error instanceof Error ? error.message : 'Network request failed';
-    logger.error('API', `<-- Network Exception ${url}: ${netErr}`);
+    logger.error('API', `<-- Network Exception: ${netErr}`);
     return {
       success: false,
       error: netErr,

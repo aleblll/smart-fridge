@@ -263,24 +263,15 @@ export function sanitizeProductItem(item: any, userId: number | string): Product
  * с проверкой auth_date (макс 3600 сек) и timing-safe сравнением хэша.
  */
 export async function verifyTelegramAuth(initDataRaw: string, botToken: string, maxAgeSec = 3600): Promise<VerifyAuthResult> {
-  if (!initDataRaw || !botToken) return { user: null, error: 'MISSING_INIT_DATA' };
+  const cleanToken = (botToken || '').trim();
+  if (!initDataRaw || !cleanToken) return { user: null, error: 'MISSING_INIT_DATA' };
 
   try {
     const urlParams = new URLSearchParams(initDataRaw);
     const hash = urlParams.get('hash');
     if (!hash) return { user: null, error: 'INVALID_SIGNATURE' };
 
-    urlParams.delete('hash');
-    urlParams.delete('signature'); // Совместимость с Bot API 8.0
-
-    const params: string[] = [];
-    for (const [key, value] of urlParams.entries()) {
-      params.push(`${key}=${value}`);
-    }
-    params.sort();
-    const dataCheckString = params.join('\n');
-
-    // K_secret = HMAC_SHA256("WebAppData", botToken)
+    // Prepare Web Crypto HMAC keys
     const encoder = new TextEncoder();
     const secretKey = await crypto.subtle.importKey(
       'raw',
@@ -289,9 +280,8 @@ export async function verifyTelegramAuth(initDataRaw: string, botToken: string, 
       false,
       ['sign']
     );
-    const secretKeySignature = await crypto.subtle.sign('HMAC', secretKey, encoder.encode(botToken));
+    const secretKeySignature = await crypto.subtle.sign('HMAC', secretKey, encoder.encode(cleanToken));
 
-    // Final HMAC
     const hmacKey = await crypto.subtle.importKey(
       'raw',
       secretKeySignature,
@@ -299,13 +289,48 @@ export async function verifyTelegramAuth(initDataRaw: string, botToken: string, 
       false,
       ['sign']
     );
-    const signature = await crypto.subtle.sign('HMAC', hmacKey, encoder.encode(dataCheckString));
-    const hexHash = Array.from(new Uint8Array(signature))
-      .map(b => b.toString(16).padStart(2, '0'))
-      .join('');
 
-    // Timing-safe check
-    if (!timingSafeCompare(hexHash.toLowerCase(), hash.toLowerCase())) {
+    const computeHexHash = async (checkString: string) => {
+      const sig = await crypto.subtle.sign('HMAC', hmacKey, encoder.encode(checkString));
+      return Array.from(new Uint8Array(sig))
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('');
+    };
+
+    // 1. Check with signature removed (standard Telegram WebApp / Bot API 8.0)
+    const paramsWithoutSig: string[] = [];
+    for (const [key, value] of urlParams.entries()) {
+      if (key !== 'hash' && key !== 'signature') {
+        paramsWithoutSig.push(`${key}=${value}`);
+      }
+    }
+    paramsWithoutSig.sort();
+    const checkString1 = paramsWithoutSig.join('\n');
+    const hash1 = await computeHexHash(checkString1);
+
+    let isValid = timingSafeCompare(hash1.toLowerCase(), hash.toLowerCase());
+
+    // 2. If not matched and signature was present, also try with signature included
+    if (!isValid && urlParams.has('signature')) {
+      const paramsWithSig: string[] = [];
+      for (const [key, value] of urlParams.entries()) {
+        if (key !== 'hash') {
+          paramsWithSig.push(`${key}=${value}`);
+        }
+      }
+      paramsWithSig.sort();
+      const checkString2 = paramsWithSig.join('\n');
+      const hash2 = await computeHexHash(checkString2);
+      isValid = timingSafeCompare(hash2.toLowerCase(), hash.toLowerCase());
+    }
+
+    if (!isValid) {
+      console.warn('[Worker Auth] 401 INVALID_SIGNATURE', {
+        tokenLen: cleanToken.length,
+        receivedHash: hash.slice(0, 8),
+        computedHash: hash1.slice(0, 8),
+        paramKeys: paramsWithoutSig.map(p => p.split('=')[0])
+      });
       return { user: null, error: 'INVALID_SIGNATURE' };
     }
 
@@ -327,7 +352,8 @@ export async function verifyTelegramAuth(initDataRaw: string, botToken: string, 
     if (!user || typeof user.id !== 'number') return { user: null, error: 'MALFORMED_DATA' };
 
     return { user, error: undefined };
-  } catch {
+  } catch (err) {
+    console.warn('[Worker Auth] Verification exception:', err);
     return { user: null, error: 'INVALID_SIGNATURE' };
   }
 }
@@ -925,7 +951,7 @@ export default {
     }
 
     const db = getDb(env);
-    const botToken = env.TELEGRAM_BOT_TOKEN || '';
+    const botToken = (env.TELEGRAM_BOT_TOKEN || (env as any).BOT_TOKEN || '').trim();
 
     // ==========================================
     // 1. Route: GET/POST /api/cron/notify (Closed by default)
@@ -991,7 +1017,7 @@ export default {
         if (message && message.chat && message.chat.id) {
           const chatId = message.chat.id;
           const fromUser = message.from;
-          const token = env.TELEGRAM_BOT_TOKEN;
+          const token = (env.TELEGRAM_BOT_TOKEN || (env as any).BOT_TOKEN || '').trim();
 
           // If user interacted, pre-create default fridge in D1 if not existing
           if (fromUser?.id && db) {

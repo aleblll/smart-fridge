@@ -2,6 +2,7 @@ name = "smart-fridge-edge-gateway"
 main = "src/index.ts"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
+workers_dev = true
 
 [vars]
 ENVIRONMENT = "production"
