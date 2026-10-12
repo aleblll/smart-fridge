@@ -3,8 +3,9 @@ import { TelegramProvider } from '@/context/TelegramContext';
 import { useTelegramWebApp } from '@/hooks/useTelegramWebApp';
 import { AddProductDrawer } from '@/components/AddProductDrawer';
 import { ProductCard } from '@/components/ProductCard';
-import { EveningIdeaCard, type RecipeIdea } from '@/components/EveningIdeaCard';
-import { CookRecipeModal } from '@/components/CookRecipeModal';
+// Recipe feature hidden per user request:
+// import { EveningIdeaCard, type RecipeIdea } from '@/components/EveningIdeaCard';
+// import { CookRecipeModal } from '@/components/CookRecipeModal';
 import { ShareModal } from '@/components/ShareModal';
 import { DiagnosticsDrawer } from '@/components/DiagnosticsDrawer';
 import { storage } from '@/lib/storage';
@@ -23,6 +24,7 @@ import {
   CheckCircle2,
   ChevronDown,
   RefreshCw,
+  Bell,
 } from 'lucide-react';
 
 const CATEGORIES = [
@@ -94,8 +96,9 @@ function MainScreen() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [diagOpen, setDiagOpen] = useState(false);
-  const [cookingRecipe, setCookingRecipe] = useState<RecipeIdea | null>(null);
-  const [cookModalOpen, setCookModalOpen] = useState(false);
+  // Recipe states hidden per user request:
+  // const [cookingRecipe, setCookingRecipe] = useState<RecipeIdea | null>(null);
+  // const [cookModalOpen, setCookModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'inventory' | 'consumed' | 'discarded'>('inventory');
   const [activeZone, setActiveZone] = useState<StorageType | 'all'>('all');
   const [selectedCategory, setSelectedCategory] = useState<string>('Все');
@@ -119,6 +122,29 @@ function MainScreen() {
       setToastMessage(null);
     }, 3500);
   }, []);
+
+  const [isSendingTestNotify, setIsSendingTestNotify] = useState(false);
+
+  const handleTestNotification = async () => {
+    haptic.impact('medium');
+    setIsSendingTestNotify(true);
+    showToast('Отправка проверки в Telegram...');
+    try {
+      const res = await api.sendTestNotification();
+      if (res.success && res.data?.delivered) {
+        haptic.notification('success');
+        showToast('🔔 Сообщение отправлено в Telegram бота!');
+      } else {
+        haptic.notification('warning');
+        showToast(res.error || 'Бот не смог отправить сообщение');
+      }
+    } catch {
+      haptic.notification('error');
+      showToast('Ошибка связи с сервером');
+    } finally {
+      setIsSendingTestNotify(false);
+    }
+  };
 
   // Helper to safely set products and automatically discard expired items
   const applyProductsWithAutoDiscard = useCallback(
@@ -401,13 +427,12 @@ function MainScreen() {
     logger.info('INVENTORY', `Item ${id} package opened, new expiry: ${updates.expires_at}`);
   };
 
-  // Handle cooking recipe: open recipe modal
+  /* Recipe cooking logic hidden per user request:
   const handleCookRecipe = (recipe: RecipeIdea) => {
     setCookingRecipe(recipe);
     setCookModalOpen(true);
   };
 
-  // Handle consuming recipe ingredients
   const handleConsumeRecipeIngredients = async (productIds: string[]) => {
     setProducts((prev) =>
       prev.map((p) =>
@@ -424,8 +449,9 @@ function MainScreen() {
         storage.updateProduct(targetFridgeId, pid, { status: 'consumed' }).catch(() => {});
       }
     }
-    logger.info('COOKING', `Consumed ${productIds.length} ingredients for recipe "${cookingRecipe?.title}"`);
+    logger.info('COOKING', `Consumed ${productIds.length} ingredients for recipe`);
   };
+  */
 
   // Permanently delete product
   const handleDeleteProduct = async (id: string) => {
@@ -591,6 +617,17 @@ function MainScreen() {
               <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-[#5E8B7E]' : ''}`} />
             </button>
 
+            {/* Test Notification / Bell Button */}
+            <button
+              type="button"
+              onClick={handleTestNotification}
+              disabled={isSendingTestNotify}
+              className="p-2 rounded-xl backdrop-blur-md bg-white/[0.05] border border-white/[0.06] text-[#8FA39D] hover:text-[#F1F5F4] hover:bg-white/[0.08] active:scale-95 transition-all shadow-xs disabled:opacity-50"
+              title="Проверить уведомления бота"
+            >
+              <Bell className={`w-3.5 h-3.5 ${isSendingTestNotify ? 'animate-bounce text-amber-300' : 'text-amber-200'}`} />
+            </button>
+
             <button
               type="button"
               onClick={() => {
@@ -714,10 +751,10 @@ function MainScreen() {
         </section>
       )}
 
-      {/* 4. ПРОДУКТОВАЯ МАГИЯ: БЛОК «✦ ИДЕЯ НА ВЕЧЕР» (Mindora Frosted Glass) */}
-      {activeTab === 'inventory' && activeZone === 'all' && selectedCategory === 'Все' && !searchQuery && (
+      {/* 4. БЛОК РЕЦЕПТОВ («Идея на вечер» временно скрыт по запросу пользователя) */}
+      {/* activeTab === 'inventory' && activeZone === 'all' && selectedCategory === 'Все' && !searchQuery && (
         <EveningIdeaCard products={products} onCookRecipe={handleCookRecipe} />
-      )}
+      ) */}
 
       {/* 5. КАТЕГОРИИ (Спокойный горизонтальный скролл без рядов одинаковых пилюль) */}
       <section className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
@@ -826,13 +863,13 @@ function MainScreen() {
         onAddProduct={handleAddProduct}
       />
 
-      {/* Quick Cook Recipe Drawer */}
-      <CookRecipeModal
+      {/* Quick Cook Recipe Drawer (hidden per user request) */}
+      {/* <CookRecipeModal
         open={cookModalOpen}
         onOpenChange={setCookModalOpen}
         recipe={cookingRecipe}
         onConsumeIngredients={handleConsumeRecipeIngredients}
-      />
+      /> */}
 
       {/* Share Family Modal */}
       <ShareModal
