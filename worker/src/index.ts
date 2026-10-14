@@ -2,6 +2,7 @@ export interface Env {
   DB?: D1Database;
   FRIDGE_KV?: KVNamespace;
   TELEGRAM_BOT_TOKEN?: string;
+  TELEGRAM_WEBHOOK_SECRET?: string;
   CRON_SECRET?: string;
   ENVIRONMENT?: string;
 }
@@ -421,10 +422,15 @@ class SqliteD1Database implements D1Database {
     return new SqliteD1PreparedStatement(this.db, query);
   }
 
-  async batch<T = any>(statements: D1PreparedStatement[]): Promise<D1Result<T>[]> {
-    const res: D1Result<T>[] = [];
+  async batch<T = any>(statements: D1PreparedStatement[]): Promise<any[]> {
+    const res: any[] = [];
     for (const s of statements) {
-      res.push(await s.all<T>());
+      const q = ((s as any).query || '').trim().toUpperCase();
+      if (q.startsWith('INSERT') || q.startsWith('UPDATE') || q.startsWith('DELETE')) {
+        res.push(await s.run());
+      } else {
+        res.push(await s.all<T>());
+      }
     }
     return res;
   }
@@ -487,7 +493,7 @@ const ALLOWED_ORIGINS = new Set([
 
 export function getCorsHeaders(request?: Request): Record<string, string> {
   const origin = request?.headers?.get('Origin') || '';
-  const allowedOrigin = origin || 'https://aleblll.github.io';
+  const allowedOrigin = ALLOWED_ORIGINS.has(origin) ? origin : 'https://aleblll.github.io';
   return {
     'Access-Control-Allow-Origin': allowedOrigin,
     'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
@@ -968,12 +974,19 @@ export default {
     }
 
     if (normalizedPath === '/api/webhook/setup' || normalizedPath === '/webhook/setup') {
+      const cronSecret = env.CRON_SECRET;
+      const provided = request.headers.get('X-Cron-Secret') ||
+        (request.headers.get('Authorization')?.startsWith('Bearer ') ? request.headers.get('Authorization')?.slice(7) : null);
+      if (!cronSecret || !provided || !timingSafeCompare(provided, cronSecret)) {
+        return jsonResponse({ error: 'Unauthorized: missing or invalid cron secret', code: 'UNAUTHORIZED' }, 401, corsHeaders);
+      }
       if (!botToken) {
         return jsonResponse({ error: 'Bot token missing on server' }, 500, corsHeaders);
       }
       const webhookUrl = `https://${url.host}/api/telegram-webhook`;
+      const secretTokenParam = env.TELEGRAM_WEBHOOK_SECRET ? `&secret_token=${encodeURIComponent(env.TELEGRAM_WEBHOOK_SECRET)}` : '';
       try {
-        const tgRes = await fetch(`https://api.telegram.org/bot${botToken}/setWebhook?url=${encodeURIComponent(webhookUrl)}`);
+        const tgRes = await fetch(`https://api.telegram.org/bot${botToken}/setWebhook?url=${encodeURIComponent(webhookUrl)}${secretTokenParam}`);
         const tgData = await tgRes.json();
         return jsonResponse({
           success: true,
@@ -1043,6 +1056,12 @@ export default {
     // Telegram Bot Webhook (handles /start & chat messages)
     // ==========================================
     if (request.method === 'POST' && (normalizedPath === '/api/telegram-webhook' || normalizedPath === '/telegram-webhook')) {
+      const expectedSecret = env.TELEGRAM_WEBHOOK_SECRET;
+      const receivedSecret = request.headers.get('X-Telegram-Bot-Api-Secret-Token');
+      if (expectedSecret && (!receivedSecret || !timingSafeCompare(receivedSecret, expectedSecret))) {
+        return jsonResponse({ error: 'Forbidden: invalid webhook secret', code: 'INVALID_WEBHOOK_SECRET' }, 403, corsHeaders);
+      }
+
       try {
         const update = await request.json() as any;
         const message = update?.message;
@@ -1058,20 +1077,22 @@ export default {
                 'SELECT fridge_id FROM fridge_members WHERE user_id = ?'
               ).bind(fromUser.id).first<any>();
               if (!existingMember) {
-                const newFridgeId = crypto.randomUUID();
+                const newFridgeId = `default-${fromUser.id}`;
                 const now = new Date().toISOString();
-                await db.prepare('INSERT INTO fridges (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)').bind(
-                  newFridgeId,
-                  'Мой холодильник',
-                  now,
-                  now
-                ).run();
-                await db.prepare('INSERT INTO fridge_members (fridge_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)').bind(
-                  newFridgeId,
-                  fromUser.id,
-                  'owner',
-                  now
-                ).run();
+                await db.batch([
+                  db.prepare('INSERT OR IGNORE INTO fridges (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)').bind(
+                    newFridgeId,
+                    'Мой холодильник',
+                    now,
+                    now
+                  ),
+                  db.prepare('INSERT OR IGNORE INTO fridge_members (fridge_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)').bind(
+                    newFridgeId,
+                    fromUser.id,
+                    'owner',
+                    now
+                  ),
+                ]);
               }
             } catch (dbErr) {
               console.warn('[Webhook] DB pre-init error:', dbErr);
@@ -1192,7 +1213,7 @@ export default {
       ).bind(authUserId).all<any>();
       const fridgeIds = (memberFridges.results || []).map((m: any) => m.fridge_id);
 
-      const items: ExpiringProductDto[] = [];
+      const items: ExpiringProductItem[] = [];
       const fridgeNames = new Set<string>();
 
       for (const fid of fridgeIds) {
@@ -1210,12 +1231,10 @@ export default {
               id: p.id,
               name: p.name,
               expires_at: p.expires_at,
-              days_left: daysLeft,
+              daysDiff: daysLeft,
               quantity: p.quantity,
               unit: p.unit,
-              storage_type: p.storage_type,
-              category: p.category,
-              is_urgent: daysLeft <= 1,
+              fridge_name: fridgeInfo?.name || 'Мой холодильник',
             });
           }
         }
@@ -1269,20 +1288,22 @@ export default {
 
       let fridges = myFridgesRes.results || [];
       if (fridges.length === 0) {
-        const newId = crypto.randomUUID();
+        const newId = `default-${authUserId}`;
         const now = new Date().toISOString();
-        await db.prepare('INSERT INTO fridges (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)').bind(
-          newId,
-          'Мой холодильник',
-          now,
-          now
-        ).run();
-        await db.prepare('INSERT INTO fridge_members (fridge_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)').bind(
-          newId,
-          authUserId,
-          'owner',
-          now
-        ).run();
+        await db.batch([
+          db.prepare('INSERT OR IGNORE INTO fridges (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)').bind(
+            newId,
+            'Мой холодильник',
+            now,
+            now
+          ),
+          db.prepare('INSERT OR IGNORE INTO fridge_members (fridge_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)').bind(
+            newId,
+            authUserId,
+            'owner',
+            now
+          ),
+        ]);
 
         fridges = [{
           id: newId,
@@ -1334,9 +1355,16 @@ export default {
       ).bind(invite.fridge_id, authUserId).first<any>();
 
       if (!existingMember) {
-        await db.prepare('UPDATE invites SET uses_count = uses_count + 1 WHERE code = ? AND uses_count < max_uses').bind(inviteCode).run();
+        const updateRes = await db.prepare(
+          'UPDATE invites SET uses_count = uses_count + 1 WHERE code = ? AND uses_count < max_uses AND expires_at > ?'
+        ).bind(inviteCode, new Date().toISOString()).run();
+
+        if (!updateRes.meta?.changes || updateRes.meta.changes === 0) {
+          return jsonResponse({ error: 'Invite limit reached or expired', code: 'INVITE_LIMIT' }, 400, corsHeaders);
+        }
+
         const now = new Date().toISOString();
-        await db.prepare('INSERT INTO fridge_members (fridge_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)').bind(
+        await db.prepare('INSERT OR IGNORE INTO fridge_members (fridge_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)').bind(
           invite.fridge_id,
           authUserId,
           'member',
@@ -1356,13 +1384,11 @@ export default {
     if (request.method === 'POST' && (inviteCreateMatch || isLegacyInviteCreate)) {
       let fridgeId = inviteCreateMatch ? inviteCreateMatch[1] : '';
       let maxUses = 10;
-      if (isLegacyInviteCreate) {
-        try {
-          const body = await request.json() as any;
-          fridgeId = body?.fridge_id || '';
-          if (body?.max_uses) maxUses = Number(body.max_uses) || 10;
-        } catch {}
-      }
+      try {
+        const body = await request.json() as any;
+        if (body?.max_uses) maxUses = Math.max(1, Math.min(100, Number(body.max_uses) || 10));
+        if (isLegacyInviteCreate && body?.fridge_id) fridgeId = body.fridge_id;
+      } catch {}
 
       if (!fridgeId) {
         return jsonResponse({ error: 'Missing fridge_id', code: 'INVALID_PAYLOAD' }, 400, corsHeaders);
@@ -1484,7 +1510,7 @@ export default {
 
           // 4. Active products limit check (max 300)
           const countRes = await db.prepare(
-            'SELECT COUNT(*) as count FROM products WHERE fridge_id = ? AND deleted_at IS NULL'
+            "SELECT COUNT(*) as count FROM products WHERE fridge_id = ? AND deleted_at IS NULL AND status = 'active'"
           ).bind(fridgeId).first<any>();
           const count = countRes?.count || 0;
           if (count >= 300) {

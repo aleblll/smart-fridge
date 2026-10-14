@@ -35,15 +35,18 @@ export function getTelegramInitData(): string {
         const hashInitData = hashParams.get('tgWebAppData');
         if (hashInitData) found = hashInitData;
       }
-    } catch {}
+    } catch {
+      // ignore URL parsing errors
+    }
   }
 
-  // 3. Cache persistence
+  // 3. Cache persistence (sessionStorage only to prevent stale replay)
   if (found) {
     try {
       sessionStorage.setItem(CACHED_INIT_DATA_KEY, found);
-      localStorage.setItem(CACHED_INIT_DATA_KEY, found);
-    } catch {}
+    } catch {
+      // ignore storage write errors
+    }
     return found;
   }
 
@@ -51,9 +54,9 @@ export function getTelegramInitData(): string {
   try {
     const sessionCached = sessionStorage.getItem(CACHED_INIT_DATA_KEY);
     if (sessionCached) return sessionCached;
-    const localCached = localStorage.getItem(CACHED_INIT_DATA_KEY);
-    if (localCached) return localCached;
-  } catch {}
+  } catch {
+    // ignore storage read errors
+  }
 
   return '';
 }

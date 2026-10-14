@@ -368,7 +368,9 @@ function MainScreen() {
         setFridges(synced);
         return firstId;
       }
-    } catch {}
+    } catch {
+      // ignore sync failure, will fallback to null
+    }
     return null;
   };
 

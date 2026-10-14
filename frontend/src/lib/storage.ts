@@ -7,6 +7,7 @@ const STORAGE_FRIDGES_LIST_KEY = 'smart_fridge_list_v2';
 const STORAGE_MUTATION_QUEUE_KEY = 'smart_fridge_mutation_queue';
 const LEGACY_STORAGE_KEY = 'smart_fridge_products_v2';
 const LEGACY_FALLBACK_KEY = 'smart_fridge_inventory';
+const LEGACY_MIGRATED_FLAG = 'smart_fridge_legacy_migrated_v1';
 
 export interface QueuedMutation {
   id: string;
@@ -103,53 +104,39 @@ export const storage = {
   },
 
   /**
-   * Collect any products found in local storage (legacy or cache) for migration
+   * One-time collection of legacy products for initial cloud migration
    */
-  getLocalProductsForMigration(activeFridgeId?: string): ProductItem[] {
+  consumeLegacyProductsForMigration(): ProductItem[] {
     if (typeof window === 'undefined') return [];
     try {
+      if (localStorage.getItem(LEGACY_MIGRATED_FLAG) === 'true') return [];
       const candidates: ProductItem[] = [];
       const seen = new Set<string>();
-
       const addItems = (raw: string | null) => {
         if (!raw) return;
         try {
           const list = JSON.parse(raw);
           if (Array.isArray(list)) {
             for (const item of list) {
-              if (item && item.id && item.name && !seen.has(item.id)) {
+              if (item && item.id && item.name && !seen.has(item.id) && !String(item.id).startsWith('demo-')) {
                 seen.add(item.id);
                 candidates.push(item);
               }
             }
           }
-        } catch {}
+        } catch {
+          // ignore malformed JSON
+        }
       };
 
-      if (activeFridgeId) {
-        addItems(localStorage.getItem(getProductsCacheKey(activeFridgeId)));
-      }
       addItems(localStorage.getItem(LEGACY_STORAGE_KEY));
       addItems(localStorage.getItem(LEGACY_FALLBACK_KEY));
 
-      // Scan all potential localStorage keys for products
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && (key.startsWith('smart_fridge') || key.includes('product') || key.includes('inventory'))) {
-          if (
-            key === STORAGE_ACTIVE_FRIDGE_KEY ||
-            key === STORAGE_FRIDGES_LIST_KEY ||
-            key === STORAGE_MUTATION_QUEUE_KEY ||
-            key.includes('log')
-          ) {
-            continue;
-          }
-          addItems(localStorage.getItem(key));
-        }
-      }
+      localStorage.setItem(LEGACY_MIGRATED_FLAG, 'true');
+      localStorage.removeItem(LEGACY_STORAGE_KEY);
+      localStorage.removeItem(LEGACY_FALLBACK_KEY);
 
-      // Filter out demo products so we only migrate real user products
-      return candidates.filter((item) => !item.id.startsWith('demo-'));
+      return candidates;
     } catch {
       return [];
     }
@@ -164,47 +151,26 @@ export const storage = {
       const targetKey = fridgeId ? getProductsCacheKey(fridgeId) : null;
       if (targetKey) {
         const local = localStorage.getItem(targetKey);
-        if (local) {
-          const parsed = JSON.parse(local);
-          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-        }
-      }
-
-      // Check legacy keys for existing users
-      const legacy = localStorage.getItem(LEGACY_STORAGE_KEY) ?? localStorage.getItem(LEGACY_FALLBACK_KEY);
-      if (legacy) {
-        const parsed = JSON.parse(legacy);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-
-      // Scan all other potential keys for non-empty items
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && (key.startsWith('smart_fridge') || key.includes('product') || key.includes('inventory'))) {
-          if (
-            key === STORAGE_ACTIVE_FRIDGE_KEY ||
-            key === STORAGE_FRIDGES_LIST_KEY ||
-            key === STORAGE_MUTATION_QUEUE_KEY ||
-            key.includes('log')
-          ) {
-            continue;
-          }
-          const raw = localStorage.getItem(key);
-          if (raw) {
-            try {
-              const parsed = JSON.parse(raw);
-              if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-            } catch {}
+        if (local !== null) {
+          try {
+            const parsed = JSON.parse(local);
+            if (Array.isArray(parsed)) return parsed;
+          } catch {
+            // ignore malformed JSON
           }
         }
       }
 
-      // If target key was explicitly set as empty array
-      if (targetKey) {
-        const local = localStorage.getItem(targetKey);
-        if (local) {
-          const parsed = JSON.parse(local);
-          if (Array.isArray(parsed)) return parsed;
+      // Check legacy keys only if legacy migration has not run yet
+      if (localStorage.getItem(LEGACY_MIGRATED_FLAG) !== 'true') {
+        const legacy = localStorage.getItem(LEGACY_STORAGE_KEY) ?? localStorage.getItem(LEGACY_FALLBACK_KEY);
+        if (legacy) {
+          try {
+            const parsed = JSON.parse(legacy);
+            if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+          } catch {
+            // ignore malformed JSON
+          }
         }
       }
     } catch (e) {
@@ -216,9 +182,10 @@ export const storage = {
   /**
    * Load products with Thin Client + Offline Cache strategy:
    * 1. Returns cached products immediately if available.
-   * 2. Fires background sync to D1 server and triggers onServerUpdated callback on success.
-   * 3. Automatically migrates local items to D1 if cloud fridge has 0 items.
-   * 4. NEVER overwrites existing data with demo items on network failures.
+   * 2. Runs pending mutation queue.
+   * 3. Fires background sync to D1 server and triggers onServerUpdated callback on success.
+   * 4. One-time initial migration of legacy local items to D1 if available.
+   * 5. NEVER overwrites existing data with demo items on network failures.
    */
   async loadProducts(
     fridgeId?: string,
@@ -226,10 +193,12 @@ export const storage = {
   ): Promise<ProductItem[] | null> {
     const cached = this.getInitialProducts(fridgeId);
 
-    // Process pending offline mutations first
-    this.processMutationQueue().catch((e) => {
+    // Process pending offline mutations
+    try {
+      await this.processMutationQueue();
+    } catch (e) {
       logger.warn('STORAGE', `Offline queue processing error: ${e instanceof Error ? e.message : String(e)}`);
-    });
+    }
 
     if (!fridgeId) {
       return cached;
@@ -238,29 +207,21 @@ export const storage = {
     // Background fetch to D1 server
     api.getFridgeProducts(fridgeId).then(async (res) => {
       if (res.success && res.data?.products) {
-        let serverProducts = res.data.products;
+        const serverProducts = res.data.products;
         logger.sync(`Loaded ${serverProducts.length} products from D1 for fridge ${fridgeId}`);
 
-        // Migration & Merge Check:
-        // 1. If server has 0 products, push all local products to D1
-        // 2. If server already has products, find any unique local products not yet on server and push them up
-        const localCandidates = this.getLocalProductsForMigration(fridgeId);
-        const serverIdSet = new Set(serverProducts.map((p) => p.id));
-        const unsyncedLocals = localCandidates.filter((p) => !serverIdSet.has(p.id));
-
-        if (unsyncedLocals.length > 0) {
-          logger.info('MIGRATION', `Syncing ${unsyncedLocals.length} local items to D1 server for fridge ${fridgeId}...`);
-          for (const item of unsyncedLocals) {
+        // One-time legacy migration check
+        const legacyCandidates = this.consumeLegacyProductsForMigration();
+        if (legacyCandidates.length > 0) {
+          logger.info('MIGRATION', `Migrating ${legacyCandidates.length} one-time legacy local items to cloud fridge ${fridgeId}...`);
+          for (const item of legacyCandidates) {
             try {
               const addRes = await api.addProduct(fridgeId, item);
               if (addRes.success && addRes.data?.product) {
                 serverProducts.push(addRes.data.product);
-                serverIdSet.add(addRes.data.product.id);
-              } else {
-                serverProducts.push(item);
               }
             } catch {
-              serverProducts.push(item);
+              // ignore individual migration error
             }
           }
         }
@@ -293,10 +254,6 @@ export const storage = {
     try {
       const raw = JSON.stringify(products);
       localStorage.setItem(getProductsCacheKey(fridgeId), raw);
-      // Keep legacy backup if products is not empty
-      if (products.length > 0) {
-        localStorage.setItem(LEGACY_STORAGE_KEY, raw);
-      }
     } catch (e) {
       logger.error('STORAGE', `Failed saving products to cache: ${e instanceof Error ? e.message : String(e)}`);
     }

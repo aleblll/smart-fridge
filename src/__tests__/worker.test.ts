@@ -637,4 +637,126 @@ describe('Cloudflare Worker Gateway & DTO Sanitizer', () => {
       expect(data.fridges[0].products[0].name).toBe('Кефир');
     });
   });
+
+  describe('Hotfix v1.1.1 Security & Integrity Enhancements', () => {
+    it('CORS whitelist should reject arbitrary origins and allow trusted origins', async () => {
+      // Untrusted Origin
+      const evilReq = new Request('https://edge.fridge.tma/api/health', {
+        headers: { 'Origin': 'https://evil-phishing-site.com' },
+      });
+      const evilRes = await worker.fetch(evilReq, env);
+      expect(evilRes.headers.get('Access-Control-Allow-Origin')).toBe('https://aleblll.github.io');
+
+      // Trusted Origin
+      const trustedReq = new Request('https://edge.fridge.tma/api/health', {
+        headers: { 'Origin': 'http://localhost:5173' },
+      });
+      const trustedRes = await worker.fetch(trustedReq, env);
+      expect(trustedRes.headers.get('Access-Control-Allow-Origin')).toBe('http://localhost:5173');
+    });
+
+    it('Webhook security: should reject /api/telegram-webhook when secret token is invalid or missing', async () => {
+      const webhookEnv = {
+        ...env,
+        TELEGRAM_WEBHOOK_SECRET: 'webhook-secret-token-xyz',
+      };
+
+      // Missing secret token
+      const reqMissing = new Request('https://edge.fridge.tma/api/telegram-webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: { text: '/start' } }),
+      });
+      const resMissing = await worker.fetch(reqMissing, webhookEnv);
+      expect(resMissing.status).toBe(403);
+      const dataMissing = await resMissing.json() as any;
+      expect(dataMissing.code).toBe('INVALID_WEBHOOK_SECRET');
+
+      // Valid secret token
+      const reqValid = new Request('https://edge.fridge.tma/api/telegram-webhook', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Telegram-Bot-Api-Secret-Token': 'webhook-secret-token-xyz',
+        },
+        body: JSON.stringify({
+          message: {
+            chat: { id: 777111 },
+            from: { id: 777111, first_name: 'Test' },
+            text: '/start',
+          },
+        }),
+      });
+      const resValid = await worker.fetch(reqValid, webhookEnv);
+      expect(resValid.status).toBe(200);
+      const dataValid = await resValid.json() as any;
+      expect(dataValid.ok).toBe(true);
+    });
+
+    it('Webhook setup route should require CRON_SECRET', async () => {
+      const reqNoAuth = new Request('https://edge.fridge.tma/api/webhook/setup');
+      const resNoAuth = await worker.fetch(reqNoAuth, env);
+      expect(resNoAuth.status).toBe(401);
+
+      const reqWithAuth = new Request('https://edge.fridge.tma/api/webhook/setup', {
+        headers: { 'X-Cron-Secret': CRON_SECRET },
+      });
+      // Will attempt to set webhook on Telegram API, which might fail or succeed depending on mock, but won't be 401
+      const resWithAuth = await worker.fetch(reqWithAuth, env);
+      expect(resWithAuth.status).not.toBe(401);
+    });
+
+    it('Deterministic default fridge ID should use default-${userId}', async () => {
+      const userC = { id: 888999, first_name: 'Charlie' };
+      const initDataC = await generateValidTelegramInitData(userC, TEST_BOT_TOKEN);
+
+      const res = await worker.fetch(new Request('https://edge.fridge.tma/api/fridges/my', {
+        headers: { 'Authorization': `tma ${initDataC}` },
+      }), env);
+      expect(res.status).toBe(200);
+      const data = await res.json() as any;
+      expect(data.fridges.length).toBe(1);
+      expect(data.fridges[0].id).toBe('default-888999');
+    });
+
+    it('Overused invite claim should return 400 INVITE_LIMIT', async () => {
+      const initDataA = await generateValidTelegramInitData(userA, TEST_BOT_TOKEN);
+      const getMyRes = await worker.fetch(new Request('https://edge.fridge.tma/api/fridges/my', {
+        headers: { 'Authorization': `tma ${initDataA}` },
+      }), env);
+      const myFridges = await getMyRes.json() as any;
+      const fridgeId = myFridges.fridges[0].id;
+
+      // Create invite with max_uses = 1
+      const createInviteRes = await worker.fetch(new Request(`https://edge.fridge.tma/api/fridges/${fridgeId}/invites`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `tma ${initDataA}`,
+        },
+        body: JSON.stringify({ max_uses: 1 }),
+      }), env);
+      const inviteData = await createInviteRes.json() as any;
+      const code = inviteData.code;
+
+      // Claim 1 (user B) -> Success
+      const initDataB = await generateValidTelegramInitData(userB, TEST_BOT_TOKEN);
+      const claim1 = await worker.fetch(new Request(`https://edge.fridge.tma/api/invites/${code}/claim`, {
+        method: 'POST',
+        headers: { 'Authorization': `tma ${initDataB}` },
+      }), env);
+      expect(claim1.status).toBe(200);
+
+      // Claim 2 (user C) -> Exceeded max_uses -> 400 INVITE_LIMIT
+      const userD = { id: 555666, first_name: 'Dave' };
+      const initDataD = await generateValidTelegramInitData(userD, TEST_BOT_TOKEN);
+      const claim2 = await worker.fetch(new Request(`https://edge.fridge.tma/api/invites/${code}/claim`, {
+        method: 'POST',
+        headers: { 'Authorization': `tma ${initDataD}` },
+      }), env);
+      expect(claim2.status).toBe(400);
+      const claim2Data = await claim2.json() as any;
+      expect(claim2Data.code).toBe('INVITE_LIMIT');
+    });
+  });
 });

@@ -1,9 +1,9 @@
 name: Daily Morning Fridge Digest Notifier
 
+# Schedule disabled: Cloudflare Worker native Cron Trigger (0 6 * * *) handles daily morning digests directly from D1
 on:
-  schedule:
-    # 06:00 UTC = 09:00 MSK daily
-    - cron: '0 6 * * *'
+  # schedule:
+  #   - cron: '0 6 * * *'
   workflow_dispatch:
 
 concurrency:
