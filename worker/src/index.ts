@@ -678,7 +678,7 @@ export function formatDigestHtml(
   userDigest: UserDigest,
   appUrl = 'https://aleblll.github.io/smart-fridge/'
 ): { html: string; replyMarkup: any } {
-  const lines: string[] = ['<b>❄️ Умный холодильник: утренний дайджест</b>', ''];
+  const lines: string[] = ['<b>🌿 Свежесть: вечерний дайджест (18:30)</b>', ''];
 
   // Sort items by urgency (daysDiff ASC)
   const sortedItems = [...userDigest.items].sort((a, b) => a.daysDiff - b.daysDiff);
@@ -1083,7 +1083,7 @@ export default {
     if (normalizedPath === '/api/health' || normalizedPath === '/health') {
       return jsonResponse({
         status: 'ok',
-        version: '1.1.0',
+        version: '1.2.0',
         subdomain: url.host,
         hasBotToken: Boolean(botToken),
         hasDb: Boolean(db),
@@ -1218,7 +1218,7 @@ export default {
           }
 
           if (token) {
-            const appUrl = 'https://aleblll.github.io/smart-fridge/?v=1.1.0';
+            const appUrl = 'https://aleblll.github.io/smart-fridge/?v=1.2.0';
             const welcomeText = 'Привет! Я «Свежесть» — умный контроль продуктов и срока годности 🌿\n\nНажми кнопку ниже, чтобы открыть холодильник и синхронизировать продукты:';
 
             await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
@@ -1358,7 +1358,7 @@ export default {
         }
       }
 
-      const appUrl = 'https://aleblll.github.io/smart-fridge/?v=1.1.0';
+      const appUrl = 'https://aleblll.github.io/smart-fridge/?v=1.2.0';
       let messageHtml = '';
 
       if (items.length > 0) {
@@ -1370,7 +1370,7 @@ export default {
         const formatted = formatDigestHtml(digest, appUrl);
         messageHtml = formatted.html;
       } else {
-        messageHtml = `🌿 <b>Умный Холодильник «Свежесть»</b>\n\n🔔 <b>Тест уведомлений пройден успешно!</b>\n\nВ вашем холодильнике сейчас нет продуктов с истекающим сроком — все позиции в безопасности.\n\nБот присылает регулярный дайджест каждое утро в 09:00 только тогда, когда до окончания срока годности продукта остается 1–2 дня. ✨`;
+        messageHtml = `🌿 <b>Умный Холодильник «Свежесть»</b>\n\n🔔 <b>Тест уведомлений пройден успешно!</b>\n\nВ вашем холодильнике сейчас нет продуктов с истекающим сроком — все позиции в безопасности.\n\nБот присылает регулярный дайджест каждый вечер в 18:30 только тогда, когда до окончания срока годности продукта остается 1–2 дня. ✨`;
       }
 
       const sendRes = await sendTelegramMessage({

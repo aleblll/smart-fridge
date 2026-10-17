@@ -64,7 +64,7 @@ describe('Worker Morning Notifier & Cron Trigger (TASK-005 & Phase 4)', () => {
 
       const { html, replyMarkup } = formatDigestHtml(sampleDigest);
 
-      expect(html).toContain('<b>❄️ Умный холодильник: утренний дайджест</b>');
+      expect(html).toContain('<b>🌿 Свежесть: вечерний дайджест (18:30)</b>');
       expect(html).toContain('🔴 <b>Истекает сегодня / просрочено:</b>');
       expect(html).toContain('• <b>Молоко &lt;3.2%&gt;</b> — 1 l (сегодня)');
       expect(html).toContain('🟡 <b>Истекает завтра:</b>');
