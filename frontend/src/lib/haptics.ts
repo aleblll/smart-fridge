@@ -1,46 +1,50 @@
-export type ImpactStyle = 'light' | 'medium' | 'heavy' | 'rigid' | 'soft';
-export type NotificationType = 'error' | 'success' | 'warning';
+export function triggerHapticSelection(): void {
+  try {
+    window.Telegram?.WebApp?.HapticFeedback?.selectionChanged?.();
+  } catch (e) {
+    void e;
+  }
+}
 
-/**
- * Safe Telegram WebApp HapticFeedback wrapper complying with DS-002 Haptics Map
- */
+export function triggerHapticImpact(style: 'light' | 'medium' | 'heavy' = 'light'): void {
+  try {
+    window.Telegram?.WebApp?.HapticFeedback?.impactOccurred?.(style);
+  } catch (e) {
+    void e;
+  }
+}
+
+export function triggerHapticNotification(type: 'success' | 'warning' | 'error'): void {
+  try {
+    window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred?.(type);
+  } catch (e) {
+    void e;
+  }
+}
+
 export const haptic = {
-  /**
-   * Impact feedback for mechanical clicks, steppers, chips, tabs, gestures
-   */
-  impact: (style: ImpactStyle = 'light') => {
-    try {
-      if (typeof window !== 'undefined') {
-        window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(style);
-      }
-    } catch {
-      // Gracefully ignore in standard browser/desktop environment
-    }
-  },
-
-  /**
-   * Notification feedback for action outcomes (success, error, warning)
-   */
-  notification: (type: NotificationType) => {
-    try {
-      if (typeof window !== 'undefined') {
-        window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred(type);
-      }
-    } catch {
-      // Gracefully ignore in standard browser/desktop environment
-    }
-  },
-
-  /**
-   * Selection feedback for wheel scrolls, date pickers, item selections
-   */
-  selection: () => {
-    try {
-      if (typeof window !== 'undefined') {
-        window.Telegram?.WebApp?.HapticFeedback?.selectionChanged();
-      }
-    } catch {
-      // Gracefully ignore in standard browser/desktop environment
-    }
-  },
+  selection: triggerHapticSelection,
+  impact: triggerHapticImpact,
+  notification: triggerHapticNotification,
 };
+
+// Исправление вывода системных единиц на русский язык ("1 kg" -> "1 кг")
+const RU_UNIT_LABELS: Record<string, string> = {
+  kg: 'кг',
+  g: 'г',
+  l: 'л',
+  ml: 'мл',
+  pcs: 'шт',
+  pack: 'уп',
+  кг: 'кг',
+  г: 'г',
+  л: 'л',
+  мл: 'мл',
+  шт: 'шт',
+  уп: 'уп',
+};
+
+export function formatUnitRu(unit: string): string {
+  if (!unit) return 'шт';
+  return RU_UNIT_LABELS[unit.toLowerCase().trim()] || unit;
+}

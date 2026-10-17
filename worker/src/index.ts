@@ -40,18 +40,50 @@ export interface ProductItem {
   id: string;
   fridge_id?: string;
   name: string;
+  canonical_name?: string;
   category: string;
+  barcode?: string | null;
   storage_type: 'fridge' | 'freezer' | 'pantry';
   quantity: number;
-  unit: 'pcs' | 'kg' | 'g' | 'l' | 'pack';
+  unit: 'pcs' | 'kg' | 'g' | 'l' | 'pack' | string;
+  is_discrete?: number;
   opened_at: string | null;
   expires_at: string;
+  after_opening_hours?: number | null;
   notify_before_days: number;
   status: 'active' | 'consumed' | 'discarded';
   added_by: number;
   created_at?: string;
   updated_at: string;
   deleted_at?: string | null;
+}
+
+export interface FridgePresetItem {
+  fridge_id: string;
+  canonical_name: string;
+  display_name: string;
+  category?: string;
+  barcode?: string | null;
+  storage_type: 'fridge' | 'freezer' | 'pantry';
+  unit: string;
+  is_discrete: number;
+  shelf_life_days: number;
+  after_opening_hours?: number | null;
+  usage_count: number;
+  last_used_at: string;
+}
+
+export interface ShoppingItem {
+  id: string;
+  fridge_id: string;
+  name: string;
+  canonical_name?: string;
+  storage_type: 'fridge' | 'freezer' | 'pantry';
+  quantity: number;
+  unit: string;
+  shelf_life_days: number;
+  is_checked: number;
+  created_at: string;
 }
 
 export interface TelegramUser {
@@ -147,19 +179,28 @@ CREATE TABLE IF NOT EXISTS products (
   id TEXT PRIMARY KEY,
   fridge_id TEXT NOT NULL,
   name TEXT NOT NULL,
-  category TEXT NOT NULL,
-  storage_type TEXT NOT NULL,
-  quantity REAL NOT NULL DEFAULT 1,
+  canonical_name TEXT NOT NULL COLLATE NOCASE DEFAULT '',
+  category TEXT NOT NULL DEFAULT 'Другое',
+  barcode TEXT,
+  storage_type TEXT NOT NULL CHECK (storage_type IN ('fridge', 'freezer', 'pantry')),
+  quantity REAL NOT NULL DEFAULT 1 CHECK (quantity >= 0),
   unit TEXT NOT NULL DEFAULT 'pcs',
+  is_discrete INTEGER NOT NULL DEFAULT 1 CHECK (is_discrete IN (0, 1)),
   opened_at TEXT,
   expires_at TEXT NOT NULL,
+  after_opening_hours INTEGER,
   notify_before_days INTEGER NOT NULL DEFAULT 2,
-  status TEXT NOT NULL DEFAULT 'active',
-  added_by INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'consumed', 'discarded')),
+  added_by INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  deleted_at TEXT
+  deleted_at TEXT,
+  FOREIGN KEY (fridge_id) REFERENCES fridges(id) ON DELETE CASCADE
 );
+
+CREATE INDEX IF NOT EXISTS idx_products_fridge ON products(fridge_id);
+CREATE INDEX IF NOT EXISTS idx_products_expires ON products(expires_at);
+CREATE INDEX IF NOT EXISTS idx_products_active_lookup ON products (fridge_id, status, storage_type, expires_at ASC);
 
 CREATE TABLE IF NOT EXISTS invites (
   code TEXT PRIMARY KEY,
@@ -177,8 +218,41 @@ CREATE TABLE IF NOT EXISTS user_notifications (
   updated_at TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_products_fridge ON products(fridge_id);
-CREATE INDEX IF NOT EXISTS idx_products_expires ON products(expires_at);
+CREATE TABLE IF NOT EXISTS fridge_presets (
+  fridge_id TEXT NOT NULL,
+  canonical_name TEXT NOT NULL COLLATE NOCASE,
+  display_name TEXT NOT NULL,
+  category TEXT,
+  barcode TEXT,
+  storage_type TEXT NOT NULL CHECK (storage_type IN ('fridge', 'freezer', 'pantry')),
+  unit TEXT NOT NULL,
+  is_discrete INTEGER NOT NULL DEFAULT 1,
+  shelf_life_days INTEGER NOT NULL,
+  after_opening_hours INTEGER,
+  usage_count INTEGER NOT NULL DEFAULT 1,
+  last_used_at TEXT NOT NULL,
+  PRIMARY KEY (fridge_id, canonical_name, storage_type),
+  FOREIGN KEY (fridge_id) REFERENCES fridges(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_fridge_presets_top ON fridge_presets (fridge_id, usage_count DESC, last_used_at DESC);
+CREATE INDEX IF NOT EXISTS idx_fridge_presets_barcode ON fridge_presets (fridge_id, barcode) WHERE barcode IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS shopping_items (
+  id TEXT PRIMARY KEY,
+  fridge_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  canonical_name TEXT NOT NULL COLLATE NOCASE,
+  storage_type TEXT NOT NULL DEFAULT 'fridge',
+  quantity REAL NOT NULL DEFAULT 1,
+  unit TEXT NOT NULL DEFAULT 'шт',
+  shelf_life_days INTEGER NOT NULL DEFAULT 7,
+  is_checked INTEGER NOT NULL DEFAULT 0 CHECK (is_checked IN (0, 1)),
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (fridge_id) REFERENCES fridges(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_shopping_fridge ON shopping_items (fridge_id, is_checked, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_members_user ON fridge_members(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_notifications_date ON user_notifications(last_digest_date);
 `;
@@ -222,13 +296,13 @@ export function sanitizeProductItem(item: any, userId: number | string): Product
   if (!item || typeof item !== 'object') return null;
 
   const validStorageTypes: Array<'fridge' | 'freezer' | 'pantry'> = ['fridge', 'freezer', 'pantry'];
-  const validUnits: Array<'pcs' | 'kg' | 'g' | 'l' | 'pack'> = ['pcs', 'kg', 'g', 'l', 'pack'];
+  const validUnits: string[] = ['pcs', 'kg', 'g', 'l', 'pack', 'шт', 'уп', 'мл', 'г', 'кг', 'л'];
   const validStatuses: Array<'active' | 'consumed' | 'discarded'> = ['active', 'consumed', 'discarded'];
 
   const storageType = validStorageTypes.includes(item.storage_type) ? item.storage_type : 'fridge';
   const unit = validUnits.includes(item.unit) ? item.unit : 'pcs';
   const status = validStatuses.includes(item.status) ? item.status : 'active';
-  const quantity = typeof item.quantity === 'number' && Number.isFinite(item.quantity) && item.quantity > 0 && item.quantity <= 10000
+  const quantity = typeof item.quantity === 'number' && Number.isFinite(item.quantity) && item.quantity >= 0 && item.quantity <= 10000
     ? item.quantity
     : 1;
 
@@ -239,16 +313,26 @@ export function sanitizeProductItem(item: any, userId: number | string): Product
     : new Date().toISOString().slice(0, 10);
 
   const createdAt = typeof item.created_at === 'string' ? item.created_at : new Date().toISOString();
+  const rawName = String(item.name || '').trim().slice(0, 128);
+  const canonicalName = typeof item.canonical_name === 'string' && item.canonical_name.trim()
+    ? item.canonical_name.trim().toLowerCase().slice(0, 128)
+    : rawName.toLowerCase();
 
   return {
     id: String(item.id || `prod-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`),
-    name: String(item.name || '').trim().slice(0, 128),
+    name: rawName,
+    canonical_name: canonicalName,
     category: String(item.category || 'Другое').slice(0, 64),
+    barcode: item.barcode ? String(item.barcode).trim().slice(0, 32) : null,
     storage_type: storageType,
     quantity: Number(quantity),
     unit: unit,
+    is_discrete: item.is_discrete === 0 ? 0 : 1,
     opened_at: item.opened_at ? String(item.opened_at).slice(0, 30) : null,
     expires_at: expiresAt,
+    after_opening_hours: typeof item.after_opening_hours === 'number' && item.after_opening_hours > 0
+      ? Math.round(item.after_opening_hours)
+      : null,
     notify_before_days: typeof item.notify_before_days === 'number' && item.notify_before_days >= 0 && item.notify_before_days <= 14
       ? item.notify_before_days
       : 2,
@@ -257,6 +341,39 @@ export function sanitizeProductItem(item: any, userId: number | string): Product
     created_at: createdAt,
     updated_at: new Date().toISOString()
   };
+}
+
+export async function upsertFridgePreset(db: D1Database, fridgeId: string, item: ProductItem): Promise<void> {
+  try {
+    const now = new Date().toISOString();
+    const [y, m, d] = item.expires_at.split('-').map(Number);
+    const expUtc = Date.UTC(y, m - 1, d);
+    const today = new Date();
+    const todayUtc = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+    const shelfLifeDays = Math.max(1, Math.round((expUtc - todayUtc) / 86400000));
+    const canonical = item.canonical_name || item.name.toLowerCase().trim();
+
+    await db.prepare(`
+      INSERT INTO fridge_presets (
+        fridge_id, canonical_name, display_name, category, barcode,
+        storage_type, unit, is_discrete, shelf_life_days, after_opening_hours,
+        usage_count, last_used_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+      ON CONFLICT(fridge_id, canonical_name, storage_type) DO UPDATE SET
+        usage_count = fridge_presets.usage_count + 1,
+        last_used_at = excluded.last_used_at,
+        display_name = excluded.display_name,
+        barcode = COALESCE(excluded.barcode, fridge_presets.barcode),
+        shelf_life_days = excluded.shelf_life_days,
+        after_opening_hours = COALESCE(excluded.after_opening_hours, fridge_presets.after_opening_hours)
+    `).bind(
+      fridgeId, canonical, item.name, item.category, item.barcode || null,
+      item.storage_type, item.unit, item.is_discrete ?? 1, shelfLifeDays, item.after_opening_hours || null,
+      now
+    ).run();
+  } catch (err) {
+    console.warn('[Worker Presets] Upsert preset error:', err);
+  }
 }
 
 /**
@@ -485,6 +602,7 @@ export const memoryStore = new Map<string, any>();
 const ALLOWED_ORIGINS = new Set([
   'https://aleblll.github.io',
   'http://localhost:5173',
+  'http://localhost:4173',
   'http://localhost:3000',
   'https://web.telegram.org',
   'https://webk.telegram.org',
@@ -1415,14 +1533,14 @@ export default {
     }
 
     // ==========================================
-    // 6. Fridge & Products CRUD Routes
+    // 6. Fridge Routes (Products, Presets, Shopping)
     // ==========================================
-    const fridgeMatch = normalizedPath.match(/^\/api\/fridges\/([a-zA-Z0-9_-]+)(?:\/products(?:\/([a-zA-Z0-9_-]+))?)?$/);
+    const fridgeSubrouteMatch = normalizedPath.match(/^\/api\/fridges\/([a-zA-Z0-9_-]+)(?:\/([a-zA-Z0-9_-]+)(?:\/([a-zA-Z0-9_-]+))?)?$/);
 
-    if (fridgeMatch) {
-      const fridgeId = fridgeMatch[1];
-      const isProductRoute = normalizedPath.includes('/products');
-      const productId = fridgeMatch[2];
+    if (fridgeSubrouteMatch) {
+      const fridgeId = fridgeSubrouteMatch[1];
+      const subresource = fridgeSubrouteMatch[2]; // 'products' | 'presets' | 'shopping' | undefined
+      const subId = fridgeSubrouteMatch[3]; // productId | itemId | 'batch' | 'transfer' | undefined
 
       // Resource-Level Auth: Check membership in fridge_members
       const membership = await db.prepare(
@@ -1434,7 +1552,7 @@ export default {
       }
 
       // Route: GET /api/fridges/:id
-      if (request.method === 'GET' && !isProductRoute) {
+      if (request.method === 'GET' && !subresource) {
         const fridge = await db.prepare('SELECT id, name, created_at, updated_at FROM fridges WHERE id = ?').bind(fridgeId).first<any>();
         if (!fridge) {
           return jsonResponse({ error: 'Fridge not found', code: 'FRIDGE_NOT_FOUND' }, 404, corsHeaders);
@@ -1447,7 +1565,7 @@ export default {
         const memberIds = members.map((m: any) => m.user_id);
 
         const productsRes = await db.prepare(
-          'SELECT id, fridge_id, name, category, storage_type, quantity, unit, opened_at, expires_at, notify_before_days, status, added_by, created_at, updated_at FROM products WHERE fridge_id = ? AND deleted_at IS NULL ORDER BY expires_at ASC'
+          'SELECT id, fridge_id, name, canonical_name, category, barcode, storage_type, quantity, unit, is_discrete, opened_at, expires_at, after_opening_hours, notify_before_days, status, added_by, created_at, updated_at FROM products WHERE fridge_id = ? AND deleted_at IS NULL ORDER BY expires_at ASC'
         ).bind(fridgeId).all<any>();
         const products = productsRes.results || [];
 
@@ -1462,145 +1580,285 @@ export default {
         }, 200, corsHeaders);
       }
 
-      // Route: GET /api/fridges/:id/products
-      if (request.method === 'GET' && isProductRoute && !productId) {
-        const productsRes = await db.prepare(
-          'SELECT id, fridge_id, name, category, storage_type, quantity, unit, opened_at, expires_at, notify_before_days, status, added_by, created_at, updated_at FROM products WHERE fridge_id = ? AND deleted_at IS NULL ORDER BY expires_at ASC'
+      // ==========================================
+      // Subresource: Presets (GET /api/fridges/:id/presets)
+      // ==========================================
+      if (request.method === 'GET' && subresource === 'presets') {
+        const presetsRes = await db.prepare(
+          `SELECT canonical_name, display_name, category, barcode, storage_type, unit, is_discrete, shelf_life_days, after_opening_hours, usage_count, last_used_at
+           FROM fridge_presets
+           WHERE fridge_id = ?
+           ORDER BY usage_count DESC, last_used_at DESC
+           LIMIT 15`
         ).bind(fridgeId).all<any>();
-        const products = productsRes.results || [];
-        return jsonResponse({ success: true, products }, 200, corsHeaders);
+        return jsonResponse({ success: true, presets: presetsRes.results || [] }, 200, corsHeaders);
       }
 
-      // Route: POST /api/fridges/:id/products
-      if (request.method === 'POST' && isProductRoute && !productId) {
-        try {
+      // ==========================================
+      // Subresource: Shopping List
+      // ==========================================
+      if (subresource === 'shopping') {
+        // GET /api/fridges/:id/shopping
+        if (request.method === 'GET' && !subId) {
+          const itemsRes = await db.prepare(
+            `SELECT id, fridge_id, name, canonical_name, storage_type, quantity, unit, shelf_life_days, is_checked, created_at
+             FROM shopping_items
+             WHERE fridge_id = ?
+             ORDER BY is_checked ASC, created_at DESC`
+          ).bind(fridgeId).all<any>();
+          return jsonResponse({ success: true, items: itemsRes.results || [] }, 200, corsHeaders);
+        }
+
+        // POST /api/fridges/:id/shopping
+        if (request.method === 'POST' && !subId) {
+          try {
+            const body = await request.json() as any;
+            const payload = body?.item || body;
+            const name = String(payload?.name || '').trim();
+            if (!name) {
+              return jsonResponse({ error: 'Missing name', code: 'INVALID_PAYLOAD' }, 400, corsHeaders);
+            }
+            const id = typeof payload.id === 'string' && payload.id ? payload.id : `shop-${Date.now()}-${crypto.randomUUID().slice(0, 6)}`;
+            const canonical = (payload.canonical_name || name).toLowerCase().trim();
+            const storageType = ['fridge', 'freezer', 'pantry'].includes(payload.storage_type) ? payload.storage_type : 'fridge';
+            const quantity = Number(payload.quantity) > 0 ? Number(payload.quantity) : 1;
+            const unit = String(payload.unit || 'шт');
+            const shelfLifeDays = Number(payload.shelf_life_days) > 0 ? Number(payload.shelf_life_days) : 7;
+            const isChecked = payload.is_checked ? 1 : 0;
+            const now = new Date().toISOString();
+
+            await db.prepare(`
+              INSERT INTO shopping_items (id, fridge_id, name, canonical_name, storage_type, quantity, unit, shelf_life_days, is_checked, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `).bind(id, fridgeId, name, canonical, storageType, quantity, unit, shelfLifeDays, isChecked, now).run();
+
+            return jsonResponse({
+              success: true,
+              item: { id, fridge_id: fridgeId, name, canonical_name: canonical, storage_type: storageType, quantity, unit, shelf_life_days: shelfLifeDays, is_checked: isChecked, created_at: now }
+            }, 201, corsHeaders);
+          } catch (e: any) {
+            return jsonResponse({ error: e.message || 'Bad Request', code: 'BAD_REQUEST' }, 400, corsHeaders);
+          }
+        }
+
+        // POST /api/fridges/:id/shopping/transfer
+        if (request.method === 'POST' && subId === 'transfer') {
+          const checkedRes = await db.prepare('SELECT * FROM shopping_items WHERE fridge_id = ? AND is_checked = 1').bind(fridgeId).all<any>();
+          const checkedItems = checkedRes.results || [];
+          if (checkedItems.length === 0) {
+            return jsonResponse({ success: true, count: 0, products: [] }, 200, corsHeaders);
+          }
+          const now = new Date();
+          const nowIso = now.toISOString();
+          const stmts: D1PreparedStatement[] = [];
+          const transferredProducts: ProductItem[] = [];
+
+          for (const item of checkedItems) {
+            const prodId = `prod-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
+            const expDate = new Date(now.getTime() + (item.shelf_life_days || 7) * 86400000);
+            const expiresAt = expDate.toISOString().slice(0, 10);
+            const storageType = item.storage_type || 'fridge';
+            const unit = item.unit || 'шт';
+            const qty = item.quantity || 1;
+            const canonical = item.canonical_name || item.name.toLowerCase();
+
+            stmts.push(
+              db.prepare(`
+                INSERT INTO products (
+                  id, fridge_id, name, canonical_name, category, barcode, storage_type,
+                  quantity, unit, is_discrete, opened_at, expires_at, after_opening_hours,
+                  notify_before_days, status, added_by, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, 'Другое', NULL, ?, ?, ?, 1, NULL, ?, NULL, 2, 'active', ?, ?, ?)
+              `).bind(prodId, fridgeId, item.name, canonical, storageType, qty, unit, expiresAt, authUserId, nowIso, nowIso)
+            );
+
+            stmts.push(
+              db.prepare(`
+                INSERT INTO fridge_presets (
+                  fridge_id, canonical_name, display_name, category, barcode,
+                  storage_type, unit, is_discrete, shelf_life_days, after_opening_hours,
+                  usage_count, last_used_at
+                ) VALUES (?, ?, ?, 'Другое', NULL, ?, ?, 1, ?, NULL, 1, ?)
+                ON CONFLICT(fridge_id, canonical_name, storage_type) DO UPDATE SET
+                  usage_count = fridge_presets.usage_count + 1,
+                  last_used_at = excluded.last_used_at,
+                  display_name = excluded.display_name
+              `).bind(fridgeId, canonical, item.name, storageType, unit, item.shelf_life_days || 7, nowIso)
+            );
+
+            stmts.push(
+              db.prepare('DELETE FROM shopping_items WHERE id = ? AND fridge_id = ?').bind(item.id, fridgeId)
+            );
+
+            transferredProducts.push({
+              id: prodId,
+              fridge_id: fridgeId,
+              name: item.name,
+              canonical_name: canonical,
+              category: 'Другое',
+              storage_type: storageType,
+              quantity: qty,
+              unit: unit,
+              is_discrete: 1,
+              opened_at: null,
+              expires_at: expiresAt,
+              notify_before_days: 2,
+              status: 'active',
+              added_by: authUserId,
+              created_at: nowIso,
+              updated_at: nowIso
+            });
+          }
+
+          await db.batch(stmts);
+          return jsonResponse({ success: true, count: checkedItems.length, products: transferredProducts }, 200, corsHeaders);
+        }
+
+        // PATCH /api/fridges/:id/shopping/:itemId
+        if (request.method === 'PATCH' && subId && subId !== 'transfer') {
           const body = await request.json() as any;
           const payload = body?.item || body;
-
-          // 1. Validate name
-          const name = typeof payload?.name === 'string' ? payload.name.trim() : '';
-          if (!name || name.length > 128) {
-            return jsonResponse({ error: 'Invalid product name: must be 1-128 characters', code: 'INVALID_PAYLOAD' }, 400, corsHeaders);
+          const existing = await db.prepare('SELECT * FROM shopping_items WHERE id = ? AND fridge_id = ?').bind(subId, fridgeId).first<any>();
+          if (!existing) {
+            return jsonResponse({ error: 'Item not found', code: 'ITEM_NOT_FOUND' }, 404, corsHeaders);
           }
-
-          // 2. Validate quantity
-          const quantity = Number(payload?.quantity);
-          if (!Number.isFinite(quantity) || quantity <= 0 || quantity > 10000) {
-            return jsonResponse({ error: 'Invalid quantity: must be finite number > 0 and <= 10000', code: 'INVALID_PAYLOAD' }, 400, corsHeaders);
-          }
-
-          // 3. Validate expires_at
-          const dateRegex = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
-          if (typeof payload?.expires_at !== 'string' || !dateRegex.test(payload.expires_at)) {
-            return jsonResponse({ error: 'Invalid expires_at format: must be YYYY-MM-DD', code: 'INVALID_PAYLOAD' }, 400, corsHeaders);
-          }
-          const [year, month, day] = payload.expires_at.split('-').map(Number);
-          const parsedDate = new Date(Date.UTC(year, month - 1, day));
-          if (
-            parsedDate.getUTCFullYear() !== year ||
-            parsedDate.getUTCMonth() !== month - 1 ||
-            parsedDate.getUTCDate() !== day
-          ) {
-            return jsonResponse({ error: 'Invalid calendar date for expires_at', code: 'INVALID_PAYLOAD' }, 400, corsHeaders);
-          }
-          const currentYear = new Date().getUTCFullYear();
-          if (year > currentYear + 5) {
-            return jsonResponse({ error: 'expires_at cannot be more than 5 years in the future', code: 'INVALID_PAYLOAD' }, 400, corsHeaders);
-          }
-
-          // 4. Active products limit check (max 300)
-          const countRes = await db.prepare(
-            "SELECT COUNT(*) as count FROM products WHERE fridge_id = ? AND deleted_at IS NULL AND status = 'active'"
-          ).bind(fridgeId).first<any>();
-          const count = countRes?.count || 0;
-          if (count >= 300) {
-            return jsonResponse({ error: 'Product limit reached: max 300 active products per fridge', code: 'PRODUCT_LIMIT_EXCEEDED' }, 400, corsHeaders);
-          }
-
-          const category = typeof payload.category === 'string' ? payload.category.slice(0, 64) : 'Другое';
-          const storageType = ['fridge', 'freezer', 'pantry'].includes(payload.storage_type) ? payload.storage_type : 'fridge';
-          const unit = ['pcs', 'kg', 'g', 'l', 'pack'].includes(payload.unit) ? payload.unit : 'pcs';
-          const status = ['active', 'consumed', 'discarded'].includes(payload.status) ? payload.status : 'active';
-          const notifyBeforeDays = typeof payload.notify_before_days === 'number' && payload.notify_before_days >= 0 && payload.notify_before_days <= 14
-            ? payload.notify_before_days
-            : 2;
-          const openedAt = payload.opened_at ? String(payload.opened_at).slice(0, 30) : null;
-
-          const prodId = typeof payload.id === 'string' && payload.id.trim()
-            ? payload.id.trim()
-            : `prod-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
-
-          const now = new Date().toISOString();
+          const isChecked = payload.is_checked !== undefined ? (payload.is_checked ? 1 : 0) : existing.is_checked;
+          const name = payload.name !== undefined ? String(payload.name).trim() : existing.name;
+          const quantity = payload.quantity !== undefined ? Number(payload.quantity) : existing.quantity;
+          const unit = payload.unit !== undefined ? String(payload.unit) : existing.unit;
+          const storageType = payload.storage_type !== undefined ? payload.storage_type : existing.storage_type;
+          const shelfLifeDays = payload.shelf_life_days !== undefined ? Number(payload.shelf_life_days) : existing.shelf_life_days;
 
           await db.prepare(`
-            INSERT INTO products (
-              id, fridge_id, name, category, storage_type, quantity, unit,
-              opened_at, expires_at, notify_before_days, status, added_by,
-              created_at, updated_at, deleted_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
-          `).bind(
-            prodId, fridgeId, name, category, storageType, quantity, unit,
-            openedAt, payload.expires_at, notifyBeforeDays, status, authUserId,
-            now, now
-          ).run();
+            UPDATE shopping_items SET
+              name = ?, canonical_name = ?, storage_type = ?, quantity = ?, unit = ?, shelf_life_days = ?, is_checked = ?
+            WHERE id = ? AND fridge_id = ?
+          `).bind(name, name.toLowerCase(), storageType, quantity, unit, shelfLifeDays, isChecked, subId, fridgeId).run();
 
-          const createdProduct: ProductItem = {
-            id: prodId,
-            fridge_id: fridgeId,
-            name,
-            category,
-            storage_type: storageType,
-            quantity,
-            unit,
-            opened_at: openedAt,
-            expires_at: payload.expires_at,
-            notify_before_days: notifyBeforeDays,
-            status,
-            added_by: authUserId,
-            created_at: now,
-            updated_at: now
-          };
+          return jsonResponse({
+            success: true,
+            item: { ...existing, name, canonical_name: name.toLowerCase(), storage_type: storageType, quantity, unit, shelf_life_days: shelfLifeDays, is_checked: isChecked }
+          }, 200, corsHeaders);
+        }
 
-          return jsonResponse({ success: true, product: createdProduct }, 201, corsHeaders);
-        } catch (e: any) {
-          return jsonResponse({ error: e.message || 'Bad Request', code: 'BAD_REQUEST' }, 400, corsHeaders);
+        // DELETE /api/fridges/:id/shopping/:itemId
+        if (request.method === 'DELETE' && subId && subId !== 'transfer') {
+          await db.prepare('DELETE FROM shopping_items WHERE id = ? AND fridge_id = ?').bind(subId, fridgeId).run();
+          return jsonResponse({ success: true, id: subId }, 200, corsHeaders);
         }
       }
 
-      // Route: PATCH /api/fridges/:id/products/:productId
-      if (request.method === 'PATCH' && isProductRoute && productId) {
-        try {
-          const existingProduct = await db.prepare(
-            'SELECT * FROM products WHERE id = ? AND fridge_id = ? AND deleted_at IS NULL'
-          ).bind(productId, fridgeId).first<any>();
+      // ==========================================
+      // Subresource: Products
+      // ==========================================
+      if (subresource === 'products') {
+        const productId = subId;
 
-          if (!existingProduct) {
-            return jsonResponse({ error: 'Product not found', code: 'PRODUCT_NOT_FOUND' }, 404, corsHeaders);
+        // Route: GET /api/fridges/:id/products
+        if (request.method === 'GET' && !productId) {
+          const productsRes = await db.prepare(
+            'SELECT id, fridge_id, name, canonical_name, category, barcode, storage_type, quantity, unit, is_discrete, opened_at, expires_at, after_opening_hours, notify_before_days, status, added_by, created_at, updated_at FROM products WHERE fridge_id = ? AND deleted_at IS NULL ORDER BY expires_at ASC'
+          ).bind(fridgeId).all<any>();
+          const products = productsRes.results || [];
+          return jsonResponse({ success: true, products }, 200, corsHeaders);
+        }
+
+        // Route: POST /api/fridges/:id/products/batch
+        if (request.method === 'POST' && productId === 'batch') {
+          try {
+            const body = await request.json() as any;
+            const items = Array.isArray(body?.items) ? body.items : [];
+            if (items.length === 0) {
+              return jsonResponse({ error: 'Items array must not be empty', code: 'INVALID_PAYLOAD' }, 400, corsHeaders);
+            }
+            if (items.length > 50) {
+              return jsonResponse({ error: 'Batch limit exceeded: max 50 items', code: 'BATCH_LIMIT_EXCEEDED' }, 400, corsHeaders);
+            }
+
+            const now = new Date().toISOString();
+            const createdProducts: ProductItem[] = [];
+            const stmts: D1PreparedStatement[] = [];
+
+            for (const rawItem of items) {
+              const sanitized = sanitizeProductItem(rawItem, authUserId);
+              if (!sanitized) continue;
+
+              sanitized.fridge_id = fridgeId;
+              createdProducts.push(sanitized);
+
+              stmts.push(
+                db.prepare(`
+                  INSERT INTO products (
+                    id, fridge_id, name, canonical_name, category, barcode, storage_type,
+                    quantity, unit, is_discrete, opened_at, expires_at, after_opening_hours,
+                    notify_before_days, status, added_by, created_at, updated_at, deleted_at
+                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                `).bind(
+                  sanitized.id, fridgeId, sanitized.name, sanitized.canonical_name, sanitized.category,
+                  sanitized.barcode || null, sanitized.storage_type, sanitized.quantity, sanitized.unit,
+                  sanitized.is_discrete ?? 1, sanitized.opened_at, sanitized.expires_at, sanitized.after_opening_hours || null,
+                  sanitized.notify_before_days, sanitized.status, authUserId, now, now
+                )
+              );
+
+              const [y, m, d] = sanitized.expires_at.split('-').map(Number);
+              const expUtc = Date.UTC(y, m - 1, d);
+              const todayUtc = Date.UTC(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
+              const shelfLife = Math.max(1, Math.round((expUtc - todayUtc) / 86400000));
+
+              stmts.push(
+                db.prepare(`
+                  INSERT INTO fridge_presets (
+                    fridge_id, canonical_name, display_name, category, barcode,
+                    storage_type, unit, is_discrete, shelf_life_days, after_opening_hours,
+                    usage_count, last_used_at
+                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                  ON CONFLICT(fridge_id, canonical_name, storage_type) DO UPDATE SET
+                    usage_count = fridge_presets.usage_count + 1,
+                    last_used_at = excluded.last_used_at,
+                    display_name = excluded.display_name,
+                    barcode = COALESCE(excluded.barcode, fridge_presets.barcode),
+                    shelf_life_days = excluded.shelf_life_days,
+                    after_opening_hours = COALESCE(excluded.after_opening_hours, fridge_presets.after_opening_hours)
+                `).bind(
+                  fridgeId, sanitized.canonical_name, sanitized.name, sanitized.category,
+                  sanitized.barcode || null, sanitized.storage_type, sanitized.unit, sanitized.is_discrete ?? 1,
+                  shelfLife, sanitized.after_opening_hours || null, now
+                )
+              );
+            }
+
+            if (stmts.length > 0) {
+              await db.batch(stmts);
+            }
+
+            return jsonResponse({ success: true, count: createdProducts.length, products: createdProducts }, 201, corsHeaders);
+          } catch (e: any) {
+            return jsonResponse({ error: e.message || 'Bad Request', code: 'BAD_REQUEST' }, 400, corsHeaders);
           }
+        }
 
-          const body = await request.json() as any;
-          const payload = body?.item || body;
+        // Route: POST /api/fridges/:id/products (Single)
+        if (request.method === 'POST' && !productId) {
+          try {
+            const body = await request.json() as any;
+            const payload = body?.item || body;
 
-          let name = existingProduct.name;
-          if (payload.name !== undefined) {
-            name = String(payload.name).trim();
+            // 1. Validate name
+            const name = typeof payload?.name === 'string' ? payload.name.trim() : '';
             if (!name || name.length > 128) {
-              return jsonResponse({ error: 'Invalid product name', code: 'INVALID_PAYLOAD' }, 400, corsHeaders);
+              return jsonResponse({ error: 'Invalid product name: must be 1-128 characters', code: 'INVALID_PAYLOAD' }, 400, corsHeaders);
             }
-          }
 
-          let quantity = existingProduct.quantity;
-          if (payload.quantity !== undefined) {
-            quantity = Number(payload.quantity);
+            // 2. Validate quantity
+            const quantity = Number(payload?.quantity);
             if (!Number.isFinite(quantity) || quantity <= 0 || quantity > 10000) {
-              return jsonResponse({ error: 'Invalid quantity', code: 'INVALID_PAYLOAD' }, 400, corsHeaders);
+              return jsonResponse({ error: 'Invalid quantity: must be finite number > 0 and <= 10000', code: 'INVALID_PAYLOAD' }, 400, corsHeaders);
             }
-          }
 
-          let expiresAt = existingProduct.expires_at;
-          if (payload.expires_at !== undefined) {
+            // 3. Validate expires_at
             const dateRegex = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
-            if (typeof payload.expires_at !== 'string' || !dateRegex.test(payload.expires_at)) {
+            if (typeof payload?.expires_at !== 'string' || !dateRegex.test(payload.expires_at)) {
               return jsonResponse({ error: 'Invalid expires_at format: must be YYYY-MM-DD', code: 'INVALID_PAYLOAD' }, 400, corsHeaders);
             }
             const [year, month, day] = payload.expires_at.split('-').map(Number);
@@ -1616,74 +1874,218 @@ export default {
             if (year > currentYear + 5) {
               return jsonResponse({ error: 'expires_at cannot be more than 5 years in the future', code: 'INVALID_PAYLOAD' }, 400, corsHeaders);
             }
-            expiresAt = payload.expires_at;
+
+            // 4. Active products limit check (max 300)
+            const countRes = await db.prepare(
+              "SELECT COUNT(*) as count FROM products WHERE fridge_id = ? AND deleted_at IS NULL AND status = 'active'"
+            ).bind(fridgeId).first<any>();
+            const count = countRes?.count || 0;
+            if (count >= 300) {
+              return jsonResponse({ error: 'Product limit reached: max 300 active products per fridge', code: 'PRODUCT_LIMIT_EXCEEDED' }, 400, corsHeaders);
+            }
+
+            const category = typeof payload.category === 'string' ? payload.category.slice(0, 64) : 'Другое';
+            const canonicalName = typeof payload.canonical_name === 'string' && payload.canonical_name.trim()
+              ? payload.canonical_name.trim().toLowerCase().slice(0, 128)
+              : name.toLowerCase();
+            const barcode = payload.barcode ? String(payload.barcode).trim().slice(0, 32) : null;
+            const storageType = ['fridge', 'freezer', 'pantry'].includes(payload.storage_type) ? payload.storage_type : 'fridge';
+            const unit = ['pcs', 'kg', 'g', 'l', 'pack', 'шт', 'уп', 'мл', 'г', 'кг', 'л'].includes(payload.unit) ? payload.unit : 'pcs';
+            const isDiscrete = payload.is_discrete === 0 ? 0 : 1;
+            const status = ['active', 'consumed', 'discarded'].includes(payload.status) ? payload.status : 'active';
+            const notifyBeforeDays = typeof payload.notify_before_days === 'number' && payload.notify_before_days >= 0 && payload.notify_before_days <= 14
+              ? payload.notify_before_days
+              : 2;
+            const openedAt = payload.opened_at ? String(payload.opened_at).slice(0, 30) : null;
+            const afterOpeningHours = typeof payload.after_opening_hours === 'number' && payload.after_opening_hours > 0
+              ? Math.round(payload.after_opening_hours)
+              : null;
+
+            const prodId = typeof payload.id === 'string' && payload.id.trim()
+              ? payload.id.trim()
+              : `prod-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
+
+            const now = new Date().toISOString();
+
+            await db.prepare(`
+              INSERT INTO products (
+                id, fridge_id, name, canonical_name, category, barcode, storage_type,
+                quantity, unit, is_discrete, opened_at, expires_at, after_opening_hours,
+                notify_before_days, status, added_by, created_at, updated_at, deleted_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+            `).bind(
+              prodId, fridgeId, name, canonicalName, category, barcode, storageType,
+              quantity, unit, isDiscrete, openedAt, payload.expires_at, afterOpeningHours,
+              notifyBeforeDays, status, authUserId, now, now
+            ).run();
+
+            const createdProduct: ProductItem = {
+              id: prodId,
+              fridge_id: fridgeId,
+              name,
+              canonical_name: canonicalName,
+              category,
+              barcode,
+              storage_type: storageType,
+              quantity,
+              unit,
+              is_discrete: isDiscrete,
+              opened_at: openedAt,
+              expires_at: payload.expires_at,
+              after_opening_hours: afterOpeningHours,
+              notify_before_days: notifyBeforeDays,
+              status,
+              added_by: authUserId,
+              created_at: now,
+              updated_at: now
+            };
+
+            await upsertFridgePreset(db, fridgeId, createdProduct);
+
+            return jsonResponse({ success: true, product: createdProduct }, 201, corsHeaders);
+          } catch (e: any) {
+            return jsonResponse({ error: e.message || 'Bad Request', code: 'BAD_REQUEST' }, 400, corsHeaders);
+          }
+        }
+
+        // Route: PATCH /api/fridges/:id/products/:productId
+        if (request.method === 'PATCH' && productId && productId !== 'batch') {
+          try {
+            const existingProduct = await db.prepare(
+              'SELECT * FROM products WHERE id = ? AND fridge_id = ? AND deleted_at IS NULL'
+            ).bind(productId, fridgeId).first<any>();
+
+            if (!existingProduct) {
+              return jsonResponse({ error: 'Product not found', code: 'PRODUCT_NOT_FOUND' }, 404, corsHeaders);
+            }
+
+            const body = await request.json() as any;
+            const payload = body?.item || body;
+
+            let name = existingProduct.name;
+            if (payload.name !== undefined) {
+              name = String(payload.name).trim();
+              if (!name || name.length > 128) {
+                return jsonResponse({ error: 'Invalid product name', code: 'INVALID_PAYLOAD' }, 400, corsHeaders);
+              }
+            }
+
+            let quantity = existingProduct.quantity;
+            let status = existingProduct.status;
+
+            // Partial decrement for consumption ("Сколько съели?")
+            if (payload.delta_consumed !== undefined && typeof payload.delta_consumed === 'number' && payload.delta_consumed > 0) {
+              quantity = Math.round(Math.max(0, existingProduct.quantity - payload.delta_consumed) * 1000) / 1000;
+              if (quantity <= 0) {
+                status = 'consumed';
+                quantity = 0;
+              }
+            } else if (payload.quantity !== undefined) {
+              quantity = Number(payload.quantity);
+              if (!Number.isFinite(quantity) || quantity < 0 || quantity > 10000) {
+                return jsonResponse({ error: 'Invalid quantity', code: 'INVALID_PAYLOAD' }, 400, corsHeaders);
+              }
+            }
+
+            if (payload.status !== undefined && ['active', 'consumed', 'discarded'].includes(payload.status)) {
+              status = payload.status;
+            }
+
+            let expiresAt = existingProduct.expires_at;
+            if (payload.expires_at !== undefined) {
+              const dateRegex = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+              if (typeof payload.expires_at !== 'string' || !dateRegex.test(payload.expires_at)) {
+                return jsonResponse({ error: 'Invalid expires_at format: must be YYYY-MM-DD', code: 'INVALID_PAYLOAD' }, 400, corsHeaders);
+              }
+              const [year, month, day] = payload.expires_at.split('-').map(Number);
+              const parsedDate = new Date(Date.UTC(year, month - 1, day));
+              if (
+                parsedDate.getUTCFullYear() !== year ||
+                parsedDate.getUTCMonth() !== month - 1 ||
+                parsedDate.getUTCDate() !== day
+              ) {
+                return jsonResponse({ error: 'Invalid calendar date for expires_at', code: 'INVALID_PAYLOAD' }, 400, corsHeaders);
+              }
+              const currentYear = new Date().getUTCFullYear();
+              if (year > currentYear + 5) {
+                return jsonResponse({ error: 'expires_at cannot be more than 5 years in the future', code: 'INVALID_PAYLOAD' }, 400, corsHeaders);
+              }
+              expiresAt = payload.expires_at;
+            }
+
+            const category = payload.category !== undefined ? String(payload.category).slice(0, 64) : existingProduct.category;
+            const storageType = payload.storage_type !== undefined && ['fridge', 'freezer', 'pantry'].includes(payload.storage_type)
+              ? payload.storage_type
+              : existingProduct.storage_type;
+            const unit = payload.unit !== undefined && ['pcs', 'kg', 'g', 'l', 'pack', 'шт', 'уп', 'мл', 'г', 'кг', 'л'].includes(payload.unit)
+              ? payload.unit
+              : existingProduct.unit;
+            const notifyBeforeDays = payload.notify_before_days !== undefined && typeof payload.notify_before_days === 'number' && payload.notify_before_days >= 0 && payload.notify_before_days <= 14
+              ? payload.notify_before_days
+              : existingProduct.notify_before_days;
+
+            let openedAt = existingProduct.opened_at;
+            if (payload.opened_at !== undefined) {
+              openedAt = payload.opened_at ? String(payload.opened_at).slice(0, 30) : null;
+              if (openedAt && !existingProduct.opened_at && existingProduct.after_opening_hours) {
+                const openingLimitDate = new Date(Date.now() + existingProduct.after_opening_hours * 3600000).toISOString().slice(0, 10);
+                if (openingLimitDate < expiresAt) {
+                  expiresAt = openingLimitDate;
+                }
+              }
+            }
+
+            const now = new Date().toISOString();
+
+            await db.prepare(`
+              UPDATE products SET
+                name = ?, category = ?, storage_type = ?, quantity = ?, unit = ?,
+                opened_at = ?, expires_at = ?, notify_before_days = ?, status = ?,
+                updated_at = ?
+              WHERE id = ? AND fridge_id = ?
+            `).bind(
+              name, category, storageType, quantity, unit,
+              openedAt, expiresAt, notifyBeforeDays, status,
+              now, productId, fridgeId
+            ).run();
+
+            const updatedProduct: ProductItem = {
+              ...existingProduct,
+              name,
+              category,
+              storage_type: storageType,
+              quantity,
+              unit,
+              opened_at: openedAt,
+              expires_at: expiresAt,
+              notify_before_days: notifyBeforeDays,
+              status,
+              updated_at: now
+            };
+
+            return jsonResponse({ success: true, product: updatedProduct }, 200, corsHeaders);
+          } catch (e: any) {
+            return jsonResponse({ error: e.message || 'Bad Request', code: 'BAD_REQUEST' }, 400, corsHeaders);
+          }
+        }
+
+        // Route: DELETE /api/fridges/:id/products/:productId
+        if (request.method === 'DELETE' && productId && productId !== 'batch') {
+          const existingProduct = await db.prepare(
+            'SELECT id FROM products WHERE id = ? AND fridge_id = ? AND deleted_at IS NULL'
+          ).bind(productId, fridgeId).first<any>();
+
+          if (!existingProduct) {
+            return jsonResponse({ error: 'Product not found', code: 'PRODUCT_NOT_FOUND' }, 404, corsHeaders);
           }
 
-          const category = payload.category !== undefined ? String(payload.category).slice(0, 64) : existingProduct.category;
-          const storageType = payload.storage_type !== undefined && ['fridge', 'freezer', 'pantry'].includes(payload.storage_type)
-            ? payload.storage_type
-            : existingProduct.storage_type;
-          const unit = payload.unit !== undefined && ['pcs', 'kg', 'g', 'l', 'pack'].includes(payload.unit)
-            ? payload.unit
-            : existingProduct.unit;
-          const status = payload.status !== undefined && ['active', 'consumed', 'discarded'].includes(payload.status)
-            ? payload.status
-            : existingProduct.status;
-          const notifyBeforeDays = payload.notify_before_days !== undefined && typeof payload.notify_before_days === 'number' && payload.notify_before_days >= 0 && payload.notify_before_days <= 14
-            ? payload.notify_before_days
-            : existingProduct.notify_before_days;
-          const openedAt = payload.opened_at !== undefined ? (payload.opened_at ? String(payload.opened_at).slice(0, 30) : null) : existingProduct.opened_at;
-
           const now = new Date().toISOString();
+          await db.prepare(
+            'UPDATE products SET deleted_at = ?, updated_at = ? WHERE id = ? AND fridge_id = ?'
+          ).bind(now, now, productId, fridgeId).run();
 
-          await db.prepare(`
-            UPDATE products SET
-              name = ?, category = ?, storage_type = ?, quantity = ?, unit = ?,
-              opened_at = ?, expires_at = ?, notify_before_days = ?, status = ?,
-              updated_at = ?
-            WHERE id = ? AND fridge_id = ?
-          `).bind(
-            name, category, storageType, quantity, unit,
-            openedAt, expiresAt, notifyBeforeDays, status,
-            now, productId, fridgeId
-          ).run();
-
-          const updatedProduct: ProductItem = {
-            ...existingProduct,
-            name,
-            category,
-            storage_type: storageType,
-            quantity,
-            unit,
-            opened_at: openedAt,
-            expires_at: expiresAt,
-            notify_before_days: notifyBeforeDays,
-            status,
-            updated_at: now
-          };
-
-          return jsonResponse({ success: true, product: updatedProduct }, 200, corsHeaders);
-        } catch (e: any) {
-          return jsonResponse({ error: e.message || 'Bad Request', code: 'BAD_REQUEST' }, 400, corsHeaders);
+          return jsonResponse({ success: true, message: 'Product deleted', id: productId }, 200, corsHeaders);
         }
-      }
-
-      // Route: DELETE /api/fridges/:id/products/:productId
-      if (request.method === 'DELETE' && isProductRoute && productId) {
-        const existingProduct = await db.prepare(
-          'SELECT id FROM products WHERE id = ? AND fridge_id = ? AND deleted_at IS NULL'
-        ).bind(productId, fridgeId).first<any>();
-
-        if (!existingProduct) {
-          return jsonResponse({ error: 'Product not found', code: 'PRODUCT_NOT_FOUND' }, 404, corsHeaders);
-        }
-
-        const now = new Date().toISOString();
-        await db.prepare(
-          'UPDATE products SET deleted_at = ?, updated_at = ? WHERE id = ? AND fridge_id = ?'
-        ).bind(now, now, productId, fridgeId).run();
-
-        return jsonResponse({ success: true, message: 'Product deleted', id: productId }, 200, corsHeaders);
       }
     }
 

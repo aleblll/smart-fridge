@@ -8,11 +8,12 @@ import { ProductCard } from '@/components/ProductCard';
 // import { CookRecipeModal } from '@/components/CookRecipeModal';
 import { ShareModal } from '@/components/ShareModal';
 import { DiagnosticsDrawer } from '@/components/DiagnosticsDrawer';
+import { ShoppingListTab } from '@/components/ShoppingListTab';
 import { storage } from '@/lib/storage';
 import { api } from '@/lib/api';
 import { logger } from '@/lib/logger';
 import { calculateFreshnessMetrics, autoDiscardExpiredProducts } from '@/lib/freshness';
-import type { ProductItem, StorageType, ProductStatus, FridgeSummary } from '@/types';
+import type { ProductItem, StorageType, ProductStatus, FridgeSummary, ShoppingItem } from '@/types';
 import {
   Plus,
   Users,
@@ -99,7 +100,7 @@ function MainScreen() {
   // Recipe states hidden per user request:
   // const [cookingRecipe, setCookingRecipe] = useState<RecipeIdea | null>(null);
   // const [cookModalOpen, setCookModalOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'inventory' | 'consumed' | 'discarded'>('inventory');
+  const [activeTab, setActiveTab] = useState<'inventory' | 'shopping' | 'consumed' | 'discarded'>('inventory');
   const [activeZone, setActiveZone] = useState<StorageType | 'all'>('all');
   const [selectedCategory, setSelectedCategory] = useState<string>('Все');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -113,14 +114,26 @@ function MainScreen() {
   });
   const [fridgeSelectorOpen, setFridgeSelectorOpen] = useState(false);
 
-  // Toast Notification
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  // Shopping List state
+  const [shoppingItems, setShoppingItems] = useState<ShoppingItem[]>(() => {
+    const fId = storage.getActiveFridgeId();
+    return fId ? storage.getCachedShoppingItems(fId) : [];
+  });
 
-  const showToast = useCallback((msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => {
-      setToastMessage(null);
-    }, 3500);
+  // Toast Notification with optional Action button (e.g. [+ В покупки])
+  const [toast, setToast] = useState<{
+    message: string;
+    actionLabel?: string;
+    onAction?: () => void;
+  } | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showToast = useCallback((msg: string, actionLabel?: string, onAction?: () => void) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast({ message: msg, actionLabel, onAction });
+    toastTimerRef.current = setTimeout(() => {
+      setToast(null);
+    }, actionLabel ? 5000 : 3500);
   }, []);
 
   const [isSendingTestNotify, setIsSendingTestNotify] = useState(false);
@@ -219,12 +232,37 @@ function MainScreen() {
     }
   };
 
+  // 5-tap secret counter on footer version string to open Diagnostics
+  const footerTapCount = useRef(0);
+  const footerTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleFooterVersionClick = () => {
+    footerTapCount.current += 1;
+    if (footerTapTimer.current) clearTimeout(footerTapTimer.current);
+    if (footerTapCount.current >= 5) {
+      footerTapCount.current = 0;
+      haptic.notification('success');
+      setDiagOpen(true);
+    } else {
+      footerTapTimer.current = setTimeout(() => {
+        footerTapCount.current = 0;
+      }, 1500);
+    }
+  };
+
   // App Initialization:
   // 1. Process Telegram start_param invite code
   // 2. Sync fridges list from D1 with persistent multi-tier retry
   // 3. Load active fridge products (Thin Client + Offline Cache)
   useEffect(() => {
     let unmounted = false;
+
+    // Disable Telegram Mini App vertical swipe to prevent accidental gesture closes
+    try {
+      window.Telegram?.WebApp?.disableVerticalSwipes?.();
+    } catch (e) {
+      void e;
+    }
 
     async function initializeApp() {
       // 1. Check for invite code in Telegram start_param
@@ -305,6 +343,9 @@ function MainScreen() {
           const processed = applyProductsWithAutoDiscard(serverProducts, targetId);
           setProducts(processed);
         });
+        storage.loadShoppingItems(targetId, (serverShopping) => {
+          setShoppingItems(serverShopping);
+        });
       }
     } catch (e) {
       logger.warn('STORAGE', `Refresh failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -313,7 +354,7 @@ function MainScreen() {
     }
   }, [activeFridgeId, applyProductsWithAutoDiscard]);
 
-  // Load products when activeFridgeId changes
+  // Load products & shopping items when activeFridgeId changes
   useEffect(() => {
     if (!activeFridgeId) return;
 
@@ -323,6 +364,8 @@ function MainScreen() {
       const processed = applyProductsWithAutoDiscard(cached, activeFridgeId);
       setProducts(processed);
     }
+    const cachedShopping = storage.getCachedShoppingItems(activeFridgeId);
+    setShoppingItems(cachedShopping);
 
     // 2. Background sync to D1 server
     refreshProducts();
@@ -396,7 +439,77 @@ function MainScreen() {
     }
   };
 
-  // Change status (consume / discard / restore)
+  // Add item to shopping list (from product card or toast)
+  const handleAddToShopping = async (product: { name: string; storage_type?: StorageType; unit?: string }) => {
+    const targetFridgeId = await ensureActiveFridge();
+    if (!targetFridgeId) return;
+
+    haptic.impact('light');
+    const newItem = await storage.addShoppingItem(targetFridgeId, {
+      name: product.name,
+      storage_type: product.storage_type || 'fridge',
+      quantity: 1,
+      unit: product.unit || 'шт',
+      shelf_life_days: product.storage_type === 'freezer' ? 90 : product.storage_type === 'pantry' ? 60 : 7,
+    });
+
+    setShoppingItems((prev) => [newItem, ...prev.filter((i) => i.id !== newItem.id)]);
+    showToast(`«${product.name}» добавлено в покупки 🛒`);
+  };
+
+  // Consume product (supports partial decrements or full consumption)
+  const handleConsumeProduct = async (id: string, delta?: number) => {
+    const product = products.find((p) => p.id === id);
+    if (!product) return;
+    const targetFridgeId = await ensureActiveFridge();
+
+    if (delta && delta < product.quantity) {
+      // Partial consumption:
+      const newQty = Math.max(0, Math.round((product.quantity - delta) * 1000) / 1000);
+      setProducts((prev) =>
+        prev.map((p) => (p.id === id ? { ...p, quantity: newQty, updated_at: new Date().toISOString() } : p))
+      );
+      if (targetFridgeId) {
+        await storage.updateProduct(targetFridgeId, id, { delta_consumed: delta });
+      }
+      haptic.notification('success');
+      showToast(`Списано: ${delta} ${product.unit}`);
+    } else {
+      // Full consumption:
+      setProducts((prev) =>
+        prev.map((p) => (p.id === id ? { ...p, status: 'consumed', updated_at: new Date().toISOString() } : p))
+      );
+      if (targetFridgeId) {
+        await storage.updateProduct(targetFridgeId, id, { status: 'consumed' });
+      }
+      haptic.notification('success');
+      showToast(`«${product.name}» съедено`, '+ В покупки', () => {
+        handleAddToShopping(product);
+      });
+    }
+    logger.info('INVENTORY', `Item ${id} consumed (delta=${delta || 'all'})`);
+  };
+
+  // Discard product (1-tap immediate discard with "+ В покупки" toast action)
+  const handleDiscardProduct = async (id: string) => {
+    const product = products.find((p) => p.id === id);
+    if (!product) return;
+    const targetFridgeId = await ensureActiveFridge();
+
+    setProducts((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, status: 'discarded', updated_at: new Date().toISOString() } : p))
+    );
+    if (targetFridgeId) {
+      await storage.updateProduct(targetFridgeId, id, { status: 'discarded' });
+    }
+    haptic.impact('medium');
+    showToast(`«${product.name}» списано в утиль`, '+ В покупки', () => {
+      handleAddToShopping(product);
+    });
+    logger.info('INVENTORY', `Item ${id} discarded`);
+  };
+
+  // Generic status change (used for restore to active)
   const setProductStatus = async (id: string, newStatus: ProductStatus) => {
     setProducts((prev) =>
       prev.map((p) =>
@@ -409,6 +522,42 @@ function MainScreen() {
       await storage.updateProduct(targetFridgeId, id, { status: newStatus });
     }
     logger.info('INVENTORY', `Item ${id} status changed to ${newStatus}`);
+  };
+
+  // Shopping list CRUD handlers
+  const handleAddShoppingItem = async (item: Partial<ShoppingItem>) => {
+    const targetFridgeId = await ensureActiveFridge();
+    if (!targetFridgeId) return;
+    const created = await storage.addShoppingItem(targetFridgeId, item);
+    setShoppingItems((prev) => [created, ...prev.filter((i) => i.id !== created.id)]);
+  };
+
+  const handleToggleShoppingItem = async (id: string, isChecked: boolean) => {
+    const targetFridgeId = await ensureActiveFridge();
+    if (!targetFridgeId) return;
+    setShoppingItems((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, is_checked: isChecked ? 1 : 0 } : item))
+    );
+    await storage.toggleShoppingItem(targetFridgeId, id, isChecked);
+  };
+
+  const handleDeleteShoppingItem = async (id: string) => {
+    const targetFridgeId = await ensureActiveFridge();
+    if (!targetFridgeId) return;
+    setShoppingItems((prev) => prev.filter((item) => item.id !== id));
+    await storage.deleteShoppingItem(targetFridgeId, id);
+  };
+
+  const handleTransferShoppingToFridge = async () => {
+    const targetFridgeId = await ensureActiveFridge();
+    if (!targetFridgeId) return;
+    haptic.notification('success');
+    const addedProducts = await storage.transferShoppingItems(targetFridgeId);
+    const remainingShopping = storage.getCachedShoppingItems(targetFridgeId);
+    setShoppingItems(remainingShopping);
+    setProducts((prev) => [...addedProducts, ...prev]);
+    showToast(`Перенесено в запасы: ${addedProducts.length} поз.`);
+    setActiveTab('inventory');
   };
 
   // Handle opening product packaging («Вскрыто»)
@@ -535,12 +684,26 @@ function MainScreen() {
 
   return (
     <div className="min-h-screen text-[#F1F5F4] px-4 py-5 max-w-md mx-auto space-y-4 pb-28">
-      {/* Floating Toast Notification */}
-      {toastMessage && (
-        <div className="fixed top-4 left-4 right-4 z-50 flex items-center justify-center pointer-events-none animate-fadeIn">
-          <div className="rounded-2xl backdrop-blur-2xl bg-[#121615]/95 border border-[#5E8B7E]/40 px-4 py-3 shadow-[0_12px_32px_rgba(0,0,0,0.5)] flex items-center gap-2.5 text-xs text-[#F1F5F4]">
-            <CheckCircle2 className="w-4 h-4 text-[#5E8B7E] shrink-0" />
-            <span className="font-medium">{toastMessage}</span>
+      {/* Floating Toast Notification with Action button */}
+      {toast && (
+        <div className="fixed top-4 left-4 right-4 z-50 flex items-center justify-center animate-fadeIn pointer-events-none">
+          <div className="rounded-2xl backdrop-blur-2xl bg-[#121615]/95 border border-[#5E8B7E]/40 px-4 py-3 shadow-[0_12px_32px_rgba(0,0,0,0.5)] flex items-center justify-between gap-3 text-xs text-[#F1F5F4] w-full max-w-sm pointer-events-auto">
+            <div className="flex items-center gap-2.5 truncate">
+              <CheckCircle2 className="w-4 h-4 text-[#5E8B7E] shrink-0" />
+              <span className="font-medium truncate">{toast.message}</span>
+            </div>
+            {toast.actionLabel && toast.onAction && (
+              <button
+                type="button"
+                onClick={() => {
+                  toast.onAction?.();
+                  setToast(null);
+                }}
+                className="shrink-0 px-2.5 py-1 rounded-lg bg-[#5E8B7E] hover:bg-[#486e63] text-[#F1F5F4] font-semibold text-[11px] shadow-sm transition-all active:scale-95"
+              >
+                {toast.actionLabel}
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -683,10 +846,11 @@ function MainScreen() {
         )}
       </header>
 
-      {/* 2. НАВИГАЦИЯ (по образцу раздела 8 Mindora — чистые текстовые вкладки) */}
+      {/* 2. НАВИГАЦИЯ (чистые текстовые вкладки) */}
       <nav className="flex items-center justify-around border-b border-white/[0.06] pt-1 pb-0.5">
         {[
-          { id: 'inventory' as const, label: 'Холодильник' },
+          { id: 'inventory' as const, label: `Запасы (${counts.active})` },
+          { id: 'shopping' as const, label: `Покупки${shoppingItems.length > 0 ? ` (${shoppingItems.length})` : ''}` },
           { id: 'consumed' as const, label: `Съедено (${counts.consumed})` },
           { id: 'discarded' as const, label: `Утиль (${counts.discarded})` },
         ].map((tab) => {
@@ -714,129 +878,140 @@ function MainScreen() {
         })}
       </nav>
 
-      {/* 3. ЗОНЫ ХРАНЕНИЯ (Легкий текстовый фильтр без тяжелых капсул) */}
-      {activeTab === 'inventory' && (
-        <section className="flex items-center justify-between px-1 py-1 text-xs">
-          <span className="text-[11px] font-medium text-[#8FA39D] uppercase tracking-wider">
-            Зона:
-          </span>
-          <div className="flex items-center gap-4">
-            {[
-              { zone: 'all' as const, label: 'Все' },
-              { zone: 'fridge' as const, label: 'Холод', icon: Refrigerator },
-              { zone: 'freezer' as const, label: 'Мороз', icon: Snowflake },
-              { zone: 'pantry' as const, label: 'Шкаф', icon: Archive },
-            ].map(({ zone, label }) => {
-              const isSelected = activeZone === zone;
+      {/* 3. ТАБ ПОКУПОК / СПИСОК «ЧТО ЗАКОНЧИЛОСЬ» */}
+      {activeTab === 'shopping' ? (
+        <ShoppingListTab
+          items={shoppingItems}
+          onAddItem={handleAddShoppingItem}
+          onToggleItem={handleToggleShoppingItem}
+          onDeleteItem={handleDeleteShoppingItem}
+          onTransferToFridge={handleTransferShoppingToFridge}
+        />
+      ) : (
+        <>
+          {/* 3. ЗОНЫ ХРАНЕНИЯ (Легкий текстовый фильтр без тяжелых капсул) */}
+          {activeTab === 'inventory' && (
+            <section className="flex items-center justify-between px-1 py-1 text-xs">
+              <span className="text-[11px] font-medium text-[#8FA39D] uppercase tracking-wider">
+                Зона:
+              </span>
+              <div className="flex items-center gap-4">
+                {[
+                  { zone: 'all' as const, label: 'Все' },
+                  { zone: 'fridge' as const, label: 'Холод', icon: Refrigerator },
+                  { zone: 'freezer' as const, label: 'Мороз', icon: Snowflake },
+                  { zone: 'pantry' as const, label: 'Шкаф', icon: Archive },
+                ].map(({ zone, label }) => {
+                  const isSelected = activeZone === zone;
+                  return (
+                    <button
+                      key={zone}
+                      type="button"
+                      onClick={() => {
+                        haptic.impact('light');
+                        setActiveZone(zone);
+                      }}
+                      className={`text-xs transition-all relative py-0.5 ${
+                        isSelected
+                          ? 'text-[#A7C7E7] font-semibold'
+                          : 'text-[#8FA39D] hover:text-[#F1F5F4]'
+                      }`}
+                    >
+                      <span>{label}</span>
+                      {isSelected && (
+                        <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-[#A7C7E7]" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+          {/* 4. БЛОК РЕЦЕПТОВ («Идея на вечер» временно скрыт по запросу пользователя) */}
+          {/* activeTab === 'inventory' && activeZone === 'all' && selectedCategory === 'Все' && !searchQuery && (
+            <EveningIdeaCard products={products} onCookRecipe={handleCookRecipe} />
+          ) */}
+
+          {/* 5. КАТЕГОРИИ (Спокойный горизонтальный скролл без рядов одинаковых пилюль) */}
+          <section className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+            {CATEGORIES.map((cat) => {
+              const isSelected = selectedCategory === cat;
               return (
                 <button
-                  key={zone}
+                  key={cat}
                   type="button"
                   onClick={() => {
-                    haptic.impact('light');
-                    setActiveZone(zone);
+                    haptic.selection();
+                    setSelectedCategory(cat);
                   }}
-                  className={`text-xs transition-all relative py-0.5 ${
+                  className={`px-3 py-1.5 rounded-xl text-xs whitespace-nowrap transition-all ${
                     isSelected
-                      ? 'text-[#A7C7E7] font-semibold'
-                      : 'text-[#8FA39D] hover:text-[#F1F5F4]'
+                      ? 'backdrop-blur-md bg-white/[0.08] text-[#F1F5F4] font-medium border border-white/[0.12] shadow-xs'
+                      : 'bg-transparent text-[#8FA39D] hover:text-[#F1F5F4]'
                   }`}
                 >
-                  <span>{label}</span>
-                  {isSelected && (
-                    <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-[#A7C7E7]" />
-                  )}
+                  {cat}
                 </button>
               );
             })}
+          </section>
+
+          {/* 6. ПОИСК (Минималистичное поле ввода Mindora) */}
+          <div className="relative">
+            <Search className="w-4 h-4 absolute left-3.5 top-3 text-[#8FA39D]" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Поиск продуктов..."
+              className="w-full pl-9 pr-4 py-2.5 rounded-2xl backdrop-blur-xl bg-white/[0.04] border border-white/[0.08] text-xs text-[#F1F5F4] placeholder-[#8FA39D]/60 focus:outline-none focus:border-[#5E8B7E] transition-all shadow-[inset_0_1px_1px_rgba(255,255,255,0.04)]"
+            />
           </div>
-        </section>
+
+          {/* 7. СПИСОК ПРОДУКТОВ (Карточки Mindora с главным героем — едой) */}
+          <section className="space-y-2.5 pt-1">
+            {displayedProducts.length === 0 ? (
+              <div className="py-12 px-6 rounded-2xl backdrop-blur-xl bg-white/[0.04] border border-white/[0.08] shadow-[inset_0_1px_1px_rgba(255,255,255,0.08),0_12px_32px_rgba(0,0,0,0.25)] text-center space-y-2.5">
+                <Sparkles className="w-7 h-7 text-[#5E8B7E] mx-auto opacity-70" />
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-[#F1F5F4]">
+                    {activeTab === 'inventory' ? 'В этой секции пусто' : 'Здесь пока нет позиций'}
+                  </p>
+                  <p className="text-xs text-[#8FA39D]">
+                    {activeTab === 'inventory'
+                      ? 'Нажмите кнопку ниже, чтобы быстро добавить продукты.'
+                      : 'История действий будет отображаться здесь.'}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              displayedProducts.map((product) => (
+                <ProductCard
+                  key={product.id}
+                  product={product}
+                  onConsume={handleConsumeProduct}
+                  onDiscard={handleDiscardProduct}
+                  onRestore={() => setProductStatus(product.id, 'active')}
+                  onDelete={handleDeleteProduct}
+                  onOpenPackage={handleOpenPackage}
+                  onAddToShopping={handleAddToShopping}
+                />
+              ))
+            )}
+          </section>
+        </>
       )}
 
-      {/* 4. БЛОК РЕЦЕПТОВ («Идея на вечер» временно скрыт по запросу пользователя) */}
-      {/* activeTab === 'inventory' && activeZone === 'all' && selectedCategory === 'Все' && !searchQuery && (
-        <EveningIdeaCard products={products} onCookRecipe={handleCookRecipe} />
-      ) */}
-
-      {/* 5. КАТЕГОРИИ (Спокойный горизонтальный скролл без рядов одинаковых пилюль) */}
-      <section className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
-        {CATEGORIES.map((cat) => {
-          const isSelected = selectedCategory === cat;
-          return (
-            <button
-              key={cat}
-              type="button"
-              onClick={() => {
-                haptic.selection();
-                setSelectedCategory(cat);
-              }}
-              className={`px-3 py-1.5 rounded-xl text-xs whitespace-nowrap transition-all ${
-                isSelected
-                  ? 'backdrop-blur-md bg-white/[0.08] text-[#F1F5F4] font-medium border border-white/[0.12] shadow-xs'
-                  : 'bg-transparent text-[#8FA39D] hover:text-[#F1F5F4]'
-              }`}
-            >
-              {cat}
-            </button>
-          );
-        })}
-      </section>
-
-      {/* 6. ПОИСК (Минималистичное поле ввода Mindora) */}
-      <div className="relative">
-        <Search className="w-4 h-4 absolute left-3.5 top-3 text-[#8FA39D]" />
-        <input
-          type="text"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Поиск продуктов..."
-          className="w-full pl-9 pr-4 py-2.5 rounded-2xl backdrop-blur-xl bg-white/[0.04] border border-white/[0.08] text-xs text-[#F1F5F4] placeholder-[#8FA39D]/60 focus:outline-none focus:border-[#5E8B7E] transition-all shadow-[inset_0_1px_1px_rgba(255,255,255,0.04)]"
-        />
-      </div>
-
-      {/* 7. СПИСОК ПРОДУКТОВ (Карточки Mindora с главным героем — едой) */}
-      <section className="space-y-2.5 pt-1">
-        {displayedProducts.length === 0 ? (
-          <div className="py-12 px-6 rounded-2xl backdrop-blur-xl bg-white/[0.04] border border-white/[0.08] shadow-[inset_0_1px_1px_rgba(255,255,255,0.08),0_12px_32px_rgba(0,0,0,0.25)] text-center space-y-2.5">
-            <Sparkles className="w-7 h-7 text-[#5E8B7E] mx-auto opacity-70" />
-            <div className="space-y-1">
-              <p className="text-sm font-semibold text-[#F1F5F4]">
-                {activeTab === 'inventory' ? 'В этой секции пусто' : 'Здесь пока нет позиций'}
-              </p>
-              <p className="text-xs text-[#8FA39D]">
-                {activeTab === 'inventory'
-                  ? 'Нажмите кнопку ниже, чтобы быстро добавить продукты.'
-                  : 'История действий будет отображаться здесь.'}
-              </p>
-            </div>
-          </div>
-        ) : (
-          displayedProducts.map((product) => (
-            <ProductCard
-              key={product.id}
-              product={product}
-              onConsume={() => setProductStatus(product.id, 'consumed')}
-              onDiscard={() => setProductStatus(product.id, 'discarded')}
-              onRestore={() => setProductStatus(product.id, 'active')}
-              onDelete={handleDeleteProduct}
-              onOpenPackage={handleOpenPackage}
-            />
-          ))
-        )}
-      </section>
-
-      {/* 9. ФУТЕР (Кликабельная версия для быстрого доступа к диагностике) */}
+      {/* 9. ФУТЕР (Кликабельная версия с секретным 5-тапом для перехода в диагностику) */}
       <footer className="pt-4 pb-2 text-center select-none">
         <button
           type="button"
-          onClick={() => {
-            haptic.impact('light');
-            setDiagOpen(true);
-          }}
+          onClick={handleFooterVersionClick}
           className="inline-flex items-center gap-1.5 text-[11px] font-mono text-[#8FA39D]/40 hover:text-[#8FA39D] active:scale-95 transition-all"
         >
           <span>
-            {activeFridgeId ? 'Свежесть v1.1 • Облако подключено 🌿' : 'Свежесть v1.1 • Автономный режим ⚡'}
+            {activeFridgeId ? 'Свежесть v1.2 • Облако подключено 🌿' : 'Свежесть v1.2 • Автономный режим ⚡'}
           </span>
         </button>
       </footer>
@@ -861,6 +1036,7 @@ function MainScreen() {
       {/* Add Product Drawer */}
       <AddProductDrawer
         open={drawerOpen}
+        activeFridgeId={activeFridgeId}
         onOpenChange={setDrawerOpen}
         onAddProduct={handleAddProduct}
       />

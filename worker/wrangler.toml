@@ -18,6 +18,6 @@ database_name = "smart-fridge-db"
 database_id = "c448cffa-f1a3-463d-bd9c-f476eb16c486"
 
 [triggers]
-crons = ["0 6 * * *"] # 06:00 UTC = 09:00 MSK ежедневно (или каждые 30 минут)
+crons = ["30 15 * * *"] # 15:30 UTC = 18:30 MSK ежедневно (вечерний дайджест «Свежести»)
 
 

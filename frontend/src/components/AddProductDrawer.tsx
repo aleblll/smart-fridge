@@ -1,16 +1,19 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Drawer } from 'vaul';
 import { haptic } from '@/lib/haptics';
-import { searchPresets, calculateExpirationDate, getRecommendedStorage } from '@/lib/presets';
+import { searchPresets, calculateExpirationDate, getRecommendedStorage, ALL_PRESETS } from '@/lib/presets';
 import { logger } from '@/lib/logger';
+import { storage } from '@/lib/storage';
+import { openTelegramBarcodeScanner, resolveProductByBarcode } from '@/lib/barcodeScanner';
 import type { FoodPreset } from '@/types/presets';
-import type { ProductItem, StorageType, UnitType } from '@/types';
-import { Plus, Minus, Check, Refrigerator, Snowflake, Archive, Search, Calendar, Sparkles, X } from 'lucide-react';
+import type { ProductItem, StorageType, UnitType, FridgePresetItem } from '@/types';
+import { Plus, Minus, Check, Refrigerator, Snowflake, Archive, Search, Calendar, Sparkles, X, ScanBarcode } from 'lucide-react';
 
 interface AddProductDrawerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onAddProduct: (product: Omit<ProductItem, 'id' | 'added_by' | 'updated_at'>) => void;
+  activeFridgeId?: string;
 }
 
 const STORAGE_OPTIONS: { type: StorageType; label: string; icon: React.FC<{ className?: string }> }[] = [
@@ -44,6 +47,7 @@ function formatDateYMD(d: Date): string {
 
 export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
   open,
+  activeFridgeId,
   onOpenChange,
   onAddProduct,
 }) => {
@@ -58,6 +62,10 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
     d.setDate(d.getDate() + 5);
     return formatDateYMD(d);
   });
+  const [barcode, setBarcode] = useState<string | null>(null);
+  const [approximateNotice, setApproximateNotice] = useState<string | null>(null);
+  const [familyPresets, setFamilyPresets] = useState<FridgePresetItem[]>([]);
+  const [isScanning, setIsScanning] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -85,9 +93,13 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
     setDaysOffset(diffDays);
   };
 
-  // On drawer open, auto focus
+  // On drawer open, auto focus & load family presets
   useEffect(() => {
     if (open) {
+      const fid = activeFridgeId || storage.getActiveFridgeId();
+      if (fid) {
+        storage.loadPresets(fid, setFamilyPresets).then(setFamilyPresets);
+      }
       const timer = setTimeout(() => {
         inputRef.current?.focus();
       }, 180);
@@ -100,10 +112,46 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
       setUnit('pcs');
       setDays(5);
       setSelectedPreset(null);
+      setBarcode(null);
+      setApproximateNotice(null);
     }
-  }, [open]);
+  }, [open, activeFridgeId]);
 
   const [selectedPreset, setSelectedPreset] = useState<FoodPreset | null>(null);
+
+  // Barcode scanner trigger via Telegram Native Camera
+  const handleScanBarcode = async () => {
+    haptic.impact('medium');
+    setIsScanning(true);
+    try {
+      const code = await openTelegramBarcodeScanner();
+      if (code) {
+        setBarcode(code);
+        const allPresetsFormatted = ALL_PRESETS.map((p) => ({
+          name: p.name,
+          category: p.category,
+          storage_type: getRecommendedStorage(p),
+          shelf_life_days: p.shelf_life_days[getRecommendedStorage(p)] || 7,
+          unit: p.default_unit,
+        }));
+        const resolved = await resolveProductByBarcode(code, allPresetsFormatted);
+        if (resolved.name) {
+          setName(resolved.name);
+          setCategory(resolved.category);
+          setStorageType(resolved.storageType);
+          setUnit(resolved.unit === 'л' ? 'l' : resolved.unit === 'кг' ? 'kg' : resolved.unit === 'г' ? 'g' : resolved.unit === 'уп' ? 'pack' : 'pcs');
+          setDays(resolved.estimatedShelfLifeDays);
+          setApproximateNotice('✨ Срок выставлен примерно — при необходимости поправьте');
+        } else {
+          setApproximateNotice(`Штрихкод ${code} распознан. Введите название.`);
+        }
+      }
+    } catch (err) {
+      logger.error('SCANNER', `Barcode scan error: ${err}`);
+    } finally {
+      setIsScanning(false);
+    }
+  };
 
   // Click on preset chip: autofills form
   const handleSelectPreset = (preset: FoodPreset) => {
@@ -151,6 +199,7 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
       notify_before_days: 2,
       status: 'active',
       after_opening_hours: selectedPreset?.after_opening_hours ?? null,
+      barcode: barcode || null,
     });
 
     logger.info('INVENTORY', `Added product: ${name.trim()} (${finalQuantity} ${unit}) expires: ${expiresAt}`);
@@ -217,22 +266,42 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="Название (молоко, сыр, рыба...)"
-                    className="w-full pl-10 pr-10 py-3 rounded-2xl bg-[#2A3834] border border-white/[0.08] text-sm text-[#F1F5F4] placeholder-[#8FA39D]/60 focus:outline-none focus:border-[#5E8B7E] focus:ring-1 focus:ring-[#5E8B7E]"
+                    className="w-full pl-10 pr-20 py-3 rounded-2xl bg-[#2A3834] border border-white/[0.08] text-sm text-[#F1F5F4] placeholder-[#8FA39D]/60 focus:outline-none focus:border-[#5E8B7E] focus:ring-1 focus:ring-[#5E8B7E]"
                     autoComplete="off"
                   />
-                  {name && (
+                  <div className="absolute right-2.5 top-2.5 flex items-center gap-1">
+                    {name && (
+                      <button
+                        type="button"
+                        onClick={() => setName('')}
+                        className="text-[#8FA39D] hover:text-[#F1F5F4] p-1"
+                        title="Очистить"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
                     <button
                       type="button"
-                      onClick={() => setName('')}
-                      className="absolute right-3.5 top-3.5 text-[#8FA39D] hover:text-[#F1F5F4]"
+                      onClick={handleScanBarcode}
+                      disabled={isScanning}
+                      title="Сканировать штрихкод (EAN-13)"
+                      className="p-1.5 rounded-xl bg-white/[0.06] text-[#5E8B7E] hover:text-[#F1F5F4] hover:bg-[#344641] active:scale-90 transition-all flex items-center gap-1 text-[11px]"
                     >
-                      <X className="w-4 h-4" />
+                      <ScanBarcode className="w-4 h-4" />
                     </button>
-                  )}
+                  </div>
                 </div>
 
-                {/* Preset Chips */}
-                {filteredPresets.length > 0 && (
+                {/* Approximate Date Notice from Barcode Scan */}
+                {approximateNotice && (
+                  <div className="p-2.5 rounded-xl bg-[#5E8B7E]/10 border border-[#5E8B7E]/20 text-xs text-[#5E8B7E] flex items-center gap-2 animate-fadeIn">
+                    <Sparkles className="w-4 h-4 shrink-0 text-[#A7C7E7]" />
+                    <span>{approximateNotice}</span>
+                  </div>
+                )}
+
+                {/* Preset Chips (Search Autocomplete) */}
+                {name.trim() && filteredPresets.length > 0 && (
                   <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1">
                     {filteredPresets.map((preset) => (
                       <button
@@ -242,12 +311,45 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#2A3834] border border-white/[0.06] text-xs text-[#F1F5F4] hover:border-[#5E8B7E] hover:text-[#5E8B7E] active:scale-95 transition-all whitespace-nowrap"
                       >
                         <Sparkles className="w-3 h-3 text-[#A7C7E7]" />
-                        <span className="font-medium">{preset.name}</span>
-                        <span className="text-[10px] text-[#8FA39D] font-mono">
+                        <span className="font-medium truncate max-w-[130px]">{preset.name}</span>
+                        <span className="text-[10px] text-[#8FA39D] font-mono shrink-0 flex-shrink-0">
                           +{preset.shelf_life_days.fridge ?? preset.shelf_life_days.pantry ?? 3}д
                         </span>
                       </button>
                     ))}
+                  </div>
+                )}
+
+                {/* Family Presets ("Частые покупки семьи" when input is empty) */}
+                {!name.trim() && familyPresets.length > 0 && (
+                  <div className="space-y-1.5 pt-0.5">
+                    <div className="text-[11px] text-[#8FA39D] flex items-center gap-1">
+                      <Sparkles className="w-3 h-3 text-[#A7C7E7]" />
+                      <span>Частые покупки семьи:</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1">
+                      {familyPresets.map((preset) => (
+                        <button
+                          key={preset.canonical_name + preset.storage_type}
+                          type="button"
+                          onClick={() => {
+                            haptic.impact('medium');
+                            setName(preset.display_name);
+                            setCategory(preset.category || 'Другое');
+                            setStorageType(preset.storage_type);
+                            setUnit((preset.unit as any) || 'pcs');
+                            setDays(preset.shelf_life_days || 7);
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#2A3834] border border-[#5E8B7E]/30 text-xs text-[#F1F5F4] hover:border-[#5E8B7E] hover:text-[#5E8B7E] active:scale-95 transition-all whitespace-nowrap"
+                        >
+                          <Sparkles className="w-3 h-3 text-[#5E8B7E]" />
+                          <span className="font-medium truncate max-w-[130px]">{preset.display_name}</span>
+                          <span className="text-[10px] text-[#8FA39D] font-mono shrink-0 flex-shrink-0">
+                            +{preset.shelf_life_days}д
+                          </span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>

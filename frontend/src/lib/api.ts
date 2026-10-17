@@ -5,6 +5,8 @@ import type {
   InviteResult,
   ClaimResult,
   ProductItem,
+  FridgePresetItem,
+  ShoppingItem,
 } from '@/types';
 import { logger } from '@/lib/logger';
 
@@ -283,5 +285,102 @@ export const api = {
     return request<{ delivered: boolean; itemsCount: number }>('/notify/test', {
       method: 'POST',
     });
+  },
+
+  /**
+   * Get frequent family presets
+   * GET /api/fridges/:id/presets
+   */
+  async getFridgePresets(fridgeId: string): Promise<ApiResponse<{ presets: FridgePresetItem[] }>> {
+    return request<{ presets: FridgePresetItem[] }>(`/fridges/${encodeURIComponent(fridgeId)}/presets`, {
+      method: 'GET',
+    });
+  },
+
+  /**
+   * Batch insert products
+   * POST /api/fridges/:id/products/batch
+   */
+  async addProductsBatch(
+    fridgeId: string,
+    items: Partial<ProductItem>[]
+  ): Promise<ApiResponse<{ count: number; products: ProductItem[] }>> {
+    return request<{ count: number; products: ProductItem[] }>(
+      `/fridges/${encodeURIComponent(fridgeId)}/products/batch`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ items }),
+      }
+    );
+  },
+
+  /**
+   * Get shopping list items
+   * GET /api/fridges/:id/shopping
+   */
+  async getShoppingItems(fridgeId: string): Promise<ApiResponse<{ items: ShoppingItem[] }>> {
+    return request<{ items: ShoppingItem[] }>(`/fridges/${encodeURIComponent(fridgeId)}/shopping`, {
+      method: 'GET',
+    });
+  },
+
+  /**
+   * Add item to shopping list
+   * POST /api/fridges/:id/shopping
+   */
+  async addShoppingItem(
+    fridgeId: string,
+    item: Partial<ShoppingItem>
+  ): Promise<ApiResponse<{ item: ShoppingItem }>> {
+    return request<{ item: ShoppingItem }>(`/fridges/${encodeURIComponent(fridgeId)}/shopping`, {
+      method: 'POST',
+      body: JSON.stringify(item),
+    });
+  },
+
+  /**
+   * Update shopping list item (check/uncheck, rename, etc.)
+   * PATCH /api/fridges/:id/shopping/:itemId
+   */
+  async updateShoppingItem(
+    fridgeId: string,
+    itemId: string,
+    updates: Partial<ShoppingItem>
+  ): Promise<ApiResponse<{ item: ShoppingItem }>> {
+    return request<{ item: ShoppingItem }>(
+      `/fridges/${encodeURIComponent(fridgeId)}/shopping/${encodeURIComponent(itemId)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(updates),
+      }
+    );
+  },
+
+  /**
+   * Delete item from shopping list
+   * DELETE /api/fridges/:id/shopping/:itemId
+   */
+  async deleteShoppingItem(fridgeId: string, itemId: string): Promise<ApiResponse<{ id: string }>> {
+    return request<{ id: string }>(
+      `/fridges/${encodeURIComponent(fridgeId)}/shopping/${encodeURIComponent(itemId)}`,
+      {
+        method: 'DELETE',
+      }
+    );
+  },
+
+  /**
+   * Transfer checked shopping items into fridge inventory
+   * POST /api/fridges/:id/shopping/transfer
+   */
+  async transferShoppingItems(
+    fridgeId: string
+  ): Promise<ApiResponse<{ count: number; products: ProductItem[] }>> {
+    return request<{ count: number; products: ProductItem[] }>(
+      `/fridges/${encodeURIComponent(fridgeId)}/shopping/transfer`,
+      {
+        method: 'POST',
+      }
+    );
   },
 };

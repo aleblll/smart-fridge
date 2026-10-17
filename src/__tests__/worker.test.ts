@@ -759,4 +759,152 @@ describe('Cloudflare Worker Gateway & DTO Sanitizer', () => {
       expect(claim2Data.code).toBe('INVITE_LIMIT');
     });
   });
+
+  describe('Release v1.2 New Features (Batch Products, Presets, Shopping List, Consumption)', () => {
+    it('should support batch insertion of products and auto-populate fridge_presets', async () => {
+      const initDataA = await generateValidTelegramInitData(userA, TEST_BOT_TOKEN);
+      const getMyRes = await worker.fetch(new Request('https://edge.fridge.tma/api/fridges/my', {
+        headers: { 'Authorization': `tma ${initDataA}` },
+      }), env);
+      const myFridges = await getMyRes.json() as any;
+      const fridgeId = myFridges.fridges[0].id;
+
+      const batchRes = await worker.fetch(new Request(`https://edge.fridge.tma/api/fridges/${fridgeId}/products/batch`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `tma ${initDataA}`,
+        },
+        body: JSON.stringify({
+          items: [
+            { name: 'Молоко 3.2%', category: 'Молочное', storage_type: 'fridge', quantity: 2, unit: 'шт', expires_at: '2026-10-25' },
+            { name: 'Сыр Российский', category: 'Молочное', storage_type: 'fridge', quantity: 300, unit: 'г', expires_at: '2026-11-01' },
+          ],
+        }),
+      }), env);
+
+      expect(batchRes.status).toBe(201);
+      const batchData = await batchRes.json() as any;
+      expect(batchData.success).toBe(true);
+      expect(batchData.count).toBe(2);
+
+      // Verify presets endpoint
+      const presetsRes = await worker.fetch(new Request(`https://edge.fridge.tma/api/fridges/${fridgeId}/presets`, {
+        headers: { 'Authorization': `tma ${initDataA}` },
+      }), env);
+      expect(presetsRes.status).toBe(200);
+      const presetsData = await presetsRes.json() as any;
+      expect(presetsData.success).toBe(true);
+      expect(presetsData.presets.length).toBeGreaterThanOrEqual(2);
+      expect(presetsData.presets.some((p: any) => p.canonical_name.includes('молоко'))).toBe(true);
+    });
+
+    it('should handle partial product consumption via delta_consumed', async () => {
+      const initDataA = await generateValidTelegramInitData(userA, TEST_BOT_TOKEN);
+      const getMyRes = await worker.fetch(new Request('https://edge.fridge.tma/api/fridges/my', {
+        headers: { 'Authorization': `tma ${initDataA}` },
+      }), env);
+      const myFridges = await getMyRes.json() as any;
+      const fridgeId = myFridges.fridges[0].id;
+
+      // Add 3 packs of yogurt
+      const addRes = await worker.fetch(new Request(`https://edge.fridge.tma/api/fridges/${fridgeId}/products`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `tma ${initDataA}`,
+        },
+        body: JSON.stringify({
+          name: 'Йогурт клубника',
+          quantity: 3,
+          unit: 'шт',
+          expires_at: '2026-10-30',
+        }),
+      }), env);
+      const addData = await addRes.json() as any;
+      const prodId = addData.product.id;
+
+      // Eat 1 pack
+      const patch1 = await worker.fetch(new Request(`https://edge.fridge.tma/api/fridges/${fridgeId}/products/${prodId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `tma ${initDataA}`,
+        },
+        body: JSON.stringify({ delta_consumed: 1 }),
+      }), env);
+      const patch1Data = await patch1.json() as any;
+      expect(patch1Data.product.quantity).toBe(2);
+      expect(patch1Data.product.status).toBe('active');
+
+      // Eat remaining 2 packs -> should become status: consumed
+      const patch2 = await worker.fetch(new Request(`https://edge.fridge.tma/api/fridges/${fridgeId}/products/${prodId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `tma ${initDataA}`,
+        },
+        body: JSON.stringify({ delta_consumed: 2 }),
+      }), env);
+      const patch2Data = await patch2.json() as any;
+      expect(patch2Data.product.quantity).toBe(0);
+      expect(patch2Data.product.status).toBe('consumed');
+    });
+
+    it('should support full Shopping List cycle (add, patch, transfer to fridge)', async () => {
+      const initDataA = await generateValidTelegramInitData(userA, TEST_BOT_TOKEN);
+      const getMyRes = await worker.fetch(new Request('https://edge.fridge.tma/api/fridges/my', {
+        headers: { 'Authorization': `tma ${initDataA}` },
+      }), env);
+      const myFridges = await getMyRes.json() as any;
+      const fridgeId = myFridges.fridges[0].id;
+
+      // 1. Add item to shopping list
+      const addShopRes = await worker.fetch(new Request(`https://edge.fridge.tma/api/fridges/${fridgeId}/shopping`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `tma ${initDataA}`,
+        },
+        body: JSON.stringify({
+          name: 'Яйца С0',
+          quantity: 10,
+          unit: 'шт',
+          shelf_life_days: 25,
+          storage_type: 'fridge',
+        }),
+      }), env);
+      expect(addShopRes.status).toBe(201);
+      const addShopData = await addShopRes.json() as any;
+      const itemId = addShopData.item.id;
+
+      // 2. Mark item as checked (bought in store)
+      const patchShopRes = await worker.fetch(new Request(`https://edge.fridge.tma/api/fridges/${fridgeId}/shopping/${itemId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `tma ${initDataA}`,
+        },
+        body: JSON.stringify({ is_checked: 1 }),
+      }), env);
+      expect(patchShopRes.status).toBe(200);
+
+      // 3. Transfer bought items into fridge
+      const transferRes = await worker.fetch(new Request(`https://edge.fridge.tma/api/fridges/${fridgeId}/shopping/transfer`, {
+        method: 'POST',
+        headers: { 'Authorization': `tma ${initDataA}` },
+      }), env);
+      expect(transferRes.status).toBe(200);
+      const transferData = await transferRes.json() as any;
+      expect(transferData.count).toBe(1);
+      expect(transferData.products[0].name).toBe('Яйца С0');
+
+      // 4. Shopping list should now be empty
+      const getShopRes = await worker.fetch(new Request(`https://edge.fridge.tma/api/fridges/${fridgeId}/shopping`, {
+        headers: { 'Authorization': `tma ${initDataA}` },
+      }), env);
+      const getShopData = await getShopRes.json() as any;
+      expect(getShopData.items.length).toBe(0);
+    });
+  });
 });

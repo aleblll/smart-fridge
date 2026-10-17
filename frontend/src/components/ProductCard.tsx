@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import type { ProductItem } from '@/types';
 import { ALL_PRESETS } from '@/lib/presets';
-import { haptic } from '@/lib/haptics';
+import { haptic, formatUnitRu } from '@/lib/haptics';
 import { calculateFreshnessMetrics } from '@/lib/freshness';
 import { getFoodVisual } from '@/lib/foodVisuals';
 import {
@@ -13,15 +13,18 @@ import {
   ChevronRight,
   Clock,
   Box,
+  ShoppingCart,
+  X,
 } from 'lucide-react';
 
 interface ProductCardProps {
   product: ProductItem;
-  onConsume?: (id: string) => void;
+  onConsume?: (id: string, delta?: number) => void;
   onDiscard?: (id: string) => void;
   onRestore?: (id: string) => void;
   onDelete?: (id: string) => void;
   onOpenPackage?: (id: string, updates: { opened_at: string; expires_at: string }) => void;
+  onAddToShopping?: (product: ProductItem) => void;
 }
 
 /**
@@ -49,8 +52,10 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   onRestore,
   onDelete,
   onOpenPackage,
+  onAddToShopping,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [showPortionSelect, setShowPortionSelect] = useState(false);
   const notifyThreshold = product.notify_before_days ?? 3;
   const { daysLeft, spentPercent, statusTag } = calculateFreshnessMetrics(
     product.expires_at,
@@ -97,10 +102,25 @@ export const ProductCard: React.FC<ProductCardProps> = ({
     setIsExpanded((prev) => !prev);
   };
 
-  const handleConsume = (e: React.MouseEvent) => {
+  const isContinuous = ['kg', 'g', 'l', 'ml', 'кг', 'г', 'л', 'мл'].includes((product.unit || '').toLowerCase());
+  const hasMultiplePortions = !isArchived && (product.quantity > 1 || isContinuous);
+
+  const handleConsumeClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (hasMultiplePortions) {
+      haptic.impact('light');
+      setShowPortionSelect((prev) => !prev);
+    } else {
+      haptic.notification('success');
+      onConsume?.(product.id);
+    }
+  };
+
+  const handlePortionSelect = (e: React.MouseEvent, delta: number) => {
     e.stopPropagation();
     haptic.notification('success');
-    onConsume?.(product.id);
+    setShowPortionSelect(false);
+    onConsume?.(product.id, delta);
   };
 
   const handleDiscard = (e: React.MouseEvent) => {
@@ -178,7 +198,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
 
           <div className="flex items-center justify-between text-xs">
             <span className="text-[#8FA39D] truncate">
-              {product.quantity} {product.unit} • {product.category}
+              {product.quantity} {formatUnitRu(product.unit)} • {product.category}
             </span>
             <span className={`shrink-0 text-[11px] font-mono ${status.color}`}>
               {status.label}
@@ -220,14 +240,14 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           )}
         </div>
 
-        {/* Right Action: Quick Check button for active items (1-tap consume) */}
+        {/* Right Action: Quick Check button for active items (1-tap consume or portion select) */}
         {!isArchived ? (
           <div className="flex items-center gap-2 shrink-0 pl-1">
             <button
               type="button"
-              onClick={handleConsume}
+              onClick={handleConsumeClick}
               className="w-9 h-9 rounded-full bg-gradient-to-r from-[#5E8B7E] to-[#486e63] text-[#F1F5F4] shadow-lg shadow-[#5E8B7E]/25 hover:brightness-110 active:scale-90 transition-all flex items-center justify-center border border-white/10 shrink-0"
-              title="Отметить съеденным (в 1 тап)"
+              title={hasMultiplePortions ? "Сколько съели?" : "Отметить съеденным (в 1 тап)"}
               aria-label="Отметить съеденным"
             >
               <Check className="w-4 h-4 stroke-[2.5]" />
@@ -250,6 +270,72 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           </div>
         )}
       </div>
+
+      {/* Portion selector inline banner when consuming multiple/continuous items */}
+      {showPortionSelect && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="mt-2.5 p-2 rounded-xl bg-white/[0.06] border border-white/[0.1] backdrop-blur-md animate-fadeIn"
+        >
+          <div className="flex items-center justify-between text-[11px] text-[#F1F5F4] font-medium pb-1.5 px-1">
+            <span>Сколько съели?</span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowPortionSelect(false);
+              }}
+              className="text-[#8FA39D] hover:text-[#F1F5F4] p-0.5"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {isContinuous ? (
+              <>
+                <button
+                  type="button"
+                  onClick={(e) => handlePortionSelect(e, Math.round(product.quantity * 0.25 * 1000) / 1000)}
+                  className="px-2.5 py-1 rounded-lg bg-white/[0.08] hover:bg-[#5E8B7E]/25 text-[11px] text-[#F1F5F4] border border-white/[0.1] active:scale-95 transition-all"
+                >
+                  25%
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => handlePortionSelect(e, Math.round(product.quantity * 0.5 * 1000) / 1000)}
+                  className="px-2.5 py-1 rounded-lg bg-white/[0.08] hover:bg-[#5E8B7E]/25 text-[11px] text-[#F1F5F4] border border-white/[0.1] active:scale-95 transition-all"
+                >
+                  50%
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => handlePortionSelect(e, product.quantity)}
+                  className="px-2.5 py-1 rounded-lg bg-[#5E8B7E]/30 hover:bg-[#5E8B7E]/40 text-[11px] text-[#F1F5F4] font-medium border border-[#5E8B7E]/40 active:scale-95 transition-all"
+                >
+                  Всё
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={(e) => handlePortionSelect(e, 1)}
+                  className="px-2.5 py-1 rounded-lg bg-white/[0.08] hover:bg-[#5E8B7E]/25 text-[11px] text-[#F1F5F4] border border-white/[0.1] active:scale-95 transition-all"
+                >
+                  1 {formatUnitRu(product.unit)}
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => handlePortionSelect(e, product.quantity)}
+                  className="px-2.5 py-1 rounded-lg bg-[#5E8B7E]/30 hover:bg-[#5E8B7E]/40 text-[11px] text-[#F1F5F4] font-medium border border-[#5E8B7E]/40 active:scale-95 transition-all"
+                >
+                  Всё ({product.quantity} {formatUnitRu(product.unit)})
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Contextual Action Drawer / Quick Actions (Revealed cleanly on tap) */}
       {isExpanded && (
@@ -274,6 +360,21 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           <div className="flex items-center gap-2">
             {isArchived ? (
               <>
+                {onAddToShopping && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      haptic.notification('success');
+                      onAddToShopping(product);
+                    }}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#5E8B7E]/15 hover:bg-[#5E8B7E]/25 text-xs text-[#5E8B7E] hover:text-[#F1F5F4] border border-[#5E8B7E]/30 active:scale-95 transition-all shadow-xs"
+                    title="Добавить в список покупок"
+                  >
+                    <ShoppingCart className="w-3.5 h-3.5" />
+                    <span>В покупки</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={handleRestore}
@@ -318,7 +419,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={handleConsume}
+                  onClick={handleConsumeClick}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-[#5E8B7E] to-[#486e63] text-xs text-[#F1F5F4] font-medium shadow-md shadow-[#5E8B7E]/20 hover:brightness-105 active:scale-95 transition-all"
                 >
                   <Check className="w-3.5 h-3.5 stroke-[2.5]" />
