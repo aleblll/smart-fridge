@@ -385,7 +385,14 @@ export async function verifyTelegramAuth(initDataRaw: string, botToken: string, 
   if (!initDataRaw || !cleanToken) return { user: null, error: 'MISSING_INIT_DATA' };
 
   try {
-    const urlParams = new URLSearchParams(initDataRaw);
+    let cleanRaw = initDataRaw.trim();
+    if (!cleanRaw.includes('hash=') && (cleanRaw.includes('%3D') || cleanRaw.includes('%26'))) {
+      try {
+        cleanRaw = decodeURIComponent(cleanRaw);
+      } catch {}
+    }
+
+    const urlParams = new URLSearchParams(cleanRaw);
     const hash = urlParams.get('hash');
     if (!hash) return { user: null, error: 'INVALID_SIGNATURE' };
 

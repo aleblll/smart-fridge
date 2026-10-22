@@ -33,29 +33,49 @@ export function getTelegramInitData(): string {
       if (tgInitData) found = tgInitData;
 
       if (!found) {
-        const hashParams = new URLSearchParams(window.location.hash.slice(1));
+        const hash = window.location.hash.startsWith('#')
+          ? window.location.hash.slice(1)
+          : window.location.hash;
+        const hashParams = new URLSearchParams(hash);
         const hashInitData = hashParams.get('tgWebAppData');
-        if (hashInitData) found = hashInitData;
+        if (hashInitData) {
+          found = hashInitData;
+        } else if (hash.includes('hash=') && hash.includes('auth_date=')) {
+          // Direct hash containing initData fields
+          found = hash;
+        }
+      }
+
+      if (!found && window.location.search.includes('hash=') && window.location.search.includes('auth_date=')) {
+        found = window.location.search.slice(1);
       }
     } catch {
       // ignore URL parsing errors
     }
   }
 
-  // 3. Cache persistence (sessionStorage only to prevent stale replay)
+  // Clean trailing or leading #, ?
+  if (found) {
+    found = found.replace(/^[#?]/, '').trim();
+  }
+
+  // 3. Cache persistence (both sessionStorage and localStorage to survive mobile webview reloads)
   if (found) {
     try {
       sessionStorage.setItem(CACHED_INIT_DATA_KEY, found);
+      localStorage.setItem(CACHED_INIT_DATA_KEY, found);
     } catch {
       // ignore storage write errors
     }
     return found;
   }
 
-  // 4. Fallback to cached value from current session
+  // 4. Fallback to cached value from current session or previous visit
   try {
     const sessionCached = sessionStorage.getItem(CACHED_INIT_DATA_KEY);
     if (sessionCached) return sessionCached;
+    const localCached = localStorage.getItem(CACHED_INIT_DATA_KEY);
+    if (localCached) return localCached;
   } catch {
     // ignore storage read errors
   }
@@ -64,9 +84,8 @@ export function getTelegramInitData(): string {
 }
 
 export const PRIMARY_WORKER_API = 'https://smart-fridge-edge-gateway.aghaskdbbb.workers.dev/api';
-export const FALLBACK_WORKER_API = 'https://smart-fridge-edge-gateway.alexeyberezin2.workers.dev/api';
 
-let activeBaseUrl = (import.meta.env.VITE_API_BASE_URL || PRIMARY_WORKER_API).replace(/\/+$/, '');
+const activeBaseUrl = (import.meta.env.VITE_API_BASE_URL || PRIMARY_WORKER_API).replace(/\/+$/, '');
 
 export function getApiBaseUrl(): string {
   return activeBaseUrl;
@@ -91,7 +110,7 @@ export function getApiUrl(endpoint: string): string {
 }
 
 /**
- * Base fetch wrapper with Telegram WebApp Authorization headers and resilient dual-gateway fallback
+ * Base fetch wrapper with Telegram WebApp Authorization headers
  */
 async function request<T>(
   endpoint: string,
@@ -109,9 +128,10 @@ async function request<T>(
     ...options.headers,
   };
 
-  const executeFetch = async (targetBase: string) => {
-    const url = buildUrl(targetBase, endpoint);
-    logger.info('API', `--> ${options.method || 'GET'} ${url} (hasInitData: ${Boolean(initData)})`);
+  const url = buildUrl(activeBaseUrl, endpoint);
+  logger.info('API', `--> ${options.method || 'GET'} ${url} (hasInitData: ${Boolean(initData)})`);
+
+  try {
     const response = await fetch(url, {
       ...options,
       headers,
@@ -129,31 +149,13 @@ async function request<T>(
     }
 
     logger.info('API', `<-- ${response.status} ${url}`);
-    activeBaseUrl = targetBase;
     return {
       success: true,
       data: data as T,
     };
-  };
-
-  try {
-    return await executeFetch(activeBaseUrl);
   } catch (error) {
-    // If activeBaseUrl failed with a network error and it was primary, attempt fallback immediately!
-    if (activeBaseUrl !== FALLBACK_WORKER_API) {
-      logger.warn('API', `Primary gateway unreachable (${activeBaseUrl}), attempting fallback to ${FALLBACK_WORKER_API}...`);
-      try {
-        const fallbackRes = await executeFetch(FALLBACK_WORKER_API);
-        activeBaseUrl = FALLBACK_WORKER_API;
-        return fallbackRes;
-      } catch (fallbackErr) {
-        const netErr = fallbackErr instanceof Error ? fallbackErr.message : 'Fallback request failed';
-        logger.error('API', `<-- Fallback network error: ${netErr}`);
-      }
-    }
-
     const netErr = error instanceof Error ? error.message : 'Network request failed';
-    logger.error('API', `<-- Network Exception: ${netErr}`);
+    logger.error('API', `<-- Network Exception for ${url}: ${netErr}`);
     return {
       success: false,
       error: netErr,

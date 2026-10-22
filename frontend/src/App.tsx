@@ -286,8 +286,8 @@ function MainScreen() {
         }
       }
 
-      // 2. Synchronize fridges list with persistent multi-tier backoff
-      const delays = [0, 400, 1200, 2500, 5000];
+      // 2. Synchronize fridges list and inventory with multi-tier backoff
+      const delays = [0, 400, 1200, 2500];
       for (const delay of delays) {
         if (unmounted) break;
         if (delay > 0) {
@@ -306,6 +306,18 @@ function MainScreen() {
               storage.setActiveFridgeId(targetFridgeId);
               setActiveFridgeId(targetFridgeId);
               logger.info('STORAGE', `Attached to active fridge: ${targetFridgeId}`);
+
+              // Immediate fetch from D1 during initialization
+              const serverProds = await storage.fetchAndSyncProducts(targetFridgeId);
+              if (!unmounted && serverProds) {
+                const processed = applyProductsWithAutoDiscard(serverProds, targetFridgeId);
+                setProducts(processed);
+                setSyncState('connected');
+              }
+              const serverShop = await storage.fetchAndSyncShoppingItems(targetFridgeId);
+              if (!unmounted && serverShop) {
+                setShoppingItems(serverShop);
+              }
             }
             break;
           }
@@ -320,39 +332,70 @@ function MainScreen() {
     return () => {
       unmounted = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const [isSyncing, setIsSyncing] = useState(false);
+  const [syncState, setSyncState] = useState<'connected' | 'syncing' | 'offline'>('connected');
 
-  // Background refresh helper: resolves active fridge if needed, then syncs products
-  const refreshProducts = useCallback(async () => {
+  // Background refresh helper: resolves active fridge, drains queue, and pulls latest state from D1
+  const refreshProducts = useCallback(async (isManual = false) => {
     setIsSyncing(true);
+    setSyncState('syncing');
     try {
+      // 1. Re-sync fridges list to verify active membership
+      const syncedFridges = await storage.syncFridges();
       let targetId = activeFridgeId;
-      if (!targetId) {
-        const synced = await storage.syncFridges();
-        if (synced && synced.length > 0) {
-          targetId = synced[0].id;
-          setFridges(synced);
+
+      if (syncedFridges && syncedFridges.length > 0) {
+        setFridges(syncedFridges);
+        const currentActive = storage.getActiveFridgeId();
+        const activeValid = syncedFridges.some((f) => f.id === currentActive);
+        targetId = activeValid ? currentActive! : syncedFridges[0].id;
+        if (targetId !== activeFridgeId) {
           storage.setActiveFridgeId(targetId);
           setActiveFridgeId(targetId);
         }
       }
+
       if (targetId) {
-        await storage.loadProducts(targetId, (serverProducts) => {
+        // 2. Fetch fresh products from D1 with flush-before-fetch
+        const serverProducts = await storage.fetchAndSyncProducts(targetId);
+        if (serverProducts) {
           const processed = applyProductsWithAutoDiscard(serverProducts, targetId);
           setProducts(processed);
-        });
-        storage.loadShoppingItems(targetId, (serverShopping) => {
+          setSyncState('connected');
+          if (isManual) {
+            haptic.notification('success');
+            showToast('Облачная синхронизация выполнена 🌿');
+          }
+        } else {
+          setSyncState('offline');
+          if (isManual) {
+            haptic.notification('warning');
+            showToast('Облако временно недоступно. Используются локальные данные 📦');
+          }
+        }
+
+        // 3. Fetch fresh shopping list from D1
+        const serverShopping = await storage.fetchAndSyncShoppingItems(targetId);
+        if (serverShopping) {
           setShoppingItems(serverShopping);
-        });
+        }
+      } else {
+        setSyncState('offline');
       }
     } catch (e) {
       logger.warn('STORAGE', `Refresh failed: ${e instanceof Error ? e.message : String(e)}`);
+      setSyncState('offline');
+      if (isManual) {
+        haptic.notification('error');
+        showToast('Ошибка при синхронизации с сервером');
+      }
     } finally {
-      setTimeout(() => setIsSyncing(false), 500);
+      setIsSyncing(false);
     }
-  }, [activeFridgeId, applyProductsWithAutoDiscard]);
+  }, [activeFridgeId, applyProductsWithAutoDiscard, showToast, haptic]);
 
   // Load products & shopping items when activeFridgeId changes
   useEffect(() => {
@@ -774,7 +817,7 @@ function MainScreen() {
               type="button"
               onClick={() => {
                 haptic.impact('light');
-                refreshProducts();
+                refreshProducts(true);
               }}
               className="p-2 rounded-xl backdrop-blur-md bg-white/[0.05] border border-white/[0.06] text-[#8FA39D] hover:text-[#F1F5F4] hover:bg-white/[0.08] active:scale-95 transition-all shadow-xs"
               title="Синхронизировать с облаком"
@@ -1011,7 +1054,11 @@ function MainScreen() {
           className="inline-flex items-center gap-1.5 text-[11px] font-mono text-[#8FA39D]/40 hover:text-[#8FA39D] active:scale-95 transition-all"
         >
           <span>
-            {activeFridgeId ? 'Свежесть v1.2 • Облако подключено 🌿' : 'Свежесть v1.2 • Автономный режим ⚡'}
+            {syncState === 'connected'
+              ? 'Свежесть v1.2 • Облако подключено 🌿'
+              : syncState === 'syncing'
+              ? 'Свежесть v1.2 • Синхронизация... ⏳'
+              : 'Свежесть v1.2 • Офлайн-режим 📦'}
           </span>
         </button>
       </footer>

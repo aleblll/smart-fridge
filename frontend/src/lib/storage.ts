@@ -83,19 +83,23 @@ export const storage = {
    */
   async syncFridges(): Promise<FridgeSummary[]> {
     logger.info('STORAGE', 'Syncing fridges from D1 server...');
-    const res = await api.getMyFridges();
-    if (res.success && res.data?.fridges) {
-      const fridges = res.data.fridges;
-      this.saveCachedFridges(fridges);
+    try {
+      const res = await api.getMyFridges();
+      if (res.success && res.data?.fridges) {
+        const fridges = res.data.fridges;
+        this.saveCachedFridges(fridges);
 
-      const currentActive = this.getActiveFridgeId();
-      const activeStillExists = fridges.some((f) => f.id === currentActive);
-      if (!currentActive || !activeStillExists) {
-        if (fridges.length > 0) {
-          this.setActiveFridgeId(fridges[0].id);
+        const currentActive = this.getActiveFridgeId();
+        const activeStillExists = fridges.some((f) => f.id === currentActive);
+        if (!currentActive || !activeStillExists) {
+          if (fridges.length > 0) {
+            this.setActiveFridgeId(fridges[0].id);
+          }
         }
+        return fridges;
       }
-      return fridges;
+    } catch (e) {
+      logger.warn('STORAGE', `syncFridges network exception: ${e instanceof Error ? e.message : String(e)}`);
     }
 
     // Offline fallback to cached list
@@ -180,32 +184,22 @@ export const storage = {
   },
 
   /**
-   * Load products with Thin Client + Offline Cache strategy:
-   * 1. Returns cached products immediately if available.
-   * 2. Runs pending mutation queue.
-   * 3. Fires background sync to D1 server and triggers onServerUpdated callback on success.
-   * 4. One-time initial migration of legacy local items to D1 if available.
-   * 5. NEVER overwrites existing data with demo items on network failures.
+   * Drain pending mutation queue and fetch latest products from D1 server.
+   * Guarantees Flush-Before-Fetch order and saves latest remote state to local cache.
    */
-  async loadProducts(
-    fridgeId?: string,
-    onServerUpdated?: (products: ProductItem[]) => void
-  ): Promise<ProductItem[] | null> {
-    const cached = this.getInitialProducts(fridgeId);
+  async fetchAndSyncProducts(fridgeId: string): Promise<ProductItem[] | null> {
+    if (!fridgeId) return null;
 
-    // Process pending offline mutations
+    // 1. Process pending offline mutations first (Flush-Before-Fetch)
     try {
       await this.processMutationQueue();
     } catch (e) {
       logger.warn('STORAGE', `Offline queue processing error: ${e instanceof Error ? e.message : String(e)}`);
     }
 
-    if (!fridgeId) {
-      return cached;
-    }
-
-    // Background fetch to D1 server
-    api.getFridgeProducts(fridgeId).then(async (res) => {
+    // 2. Fetch fresh inventory from D1
+    try {
+      const res = await api.getFridgeProducts(fridgeId);
       if (res.success && res.data?.products) {
         const serverProducts = res.data.products;
         logger.sync(`Loaded ${serverProducts.length} products from D1 for fridge ${fridgeId}`);
@@ -227,20 +221,44 @@ export const storage = {
         }
 
         this.saveProductsLocally(fridgeId, serverProducts);
-        if (onServerUpdated) {
-          onServerUpdated(serverProducts);
-        }
+        return serverProducts;
       } else {
         logger.warn(
           'STORAGE',
           `Server load failed or offline: ${res.error || 'network issue'}. Retaining local cache.`
         );
+        return null;
       }
-    }).catch((err) => {
+    } catch (err) {
       logger.warn(
         'STORAGE',
-        `Network error during background fetch: ${err instanceof Error ? err.message : String(err)}. Retaining local cache.`
+        `Network error during fetch: ${err instanceof Error ? err.message : String(err)}. Retaining local cache.`
       );
+      return null;
+    }
+  },
+
+  /**
+   * Load products with Thin Client + Offline Cache strategy:
+   * 1. Returns cached products immediately if available.
+   * 2. Runs background sync to D1 server and triggers onServerUpdated callback on success.
+   * 3. NEVER overwrites existing data with demo items on network failures.
+   */
+  async loadProducts(
+    fridgeId?: string,
+    onServerUpdated?: (products: ProductItem[]) => void
+  ): Promise<ProductItem[] | null> {
+    const cached = this.getInitialProducts(fridgeId);
+
+    if (!fridgeId) {
+      return cached;
+    }
+
+    // Background fetch to D1 server
+    this.fetchAndSyncProducts(fridgeId).then((serverProducts) => {
+      if (serverProducts && onServerUpdated) {
+        onServerUpdated(serverProducts);
+      }
     });
 
     return cached;
@@ -521,20 +539,30 @@ export const storage = {
     }
   },
 
+  async fetchAndSyncShoppingItems(fridgeId: string): Promise<ShoppingItem[] | null> {
+    if (!fridgeId) return null;
+    try {
+      const res = await api.getShoppingItems(fridgeId);
+      if (res.success && res.data?.items) {
+        this.saveShoppingItemsLocally(fridgeId, res.data.items);
+        return res.data.items;
+      }
+      return null;
+    } catch (err) {
+      logger.warn('STORAGE', `Failed fetching shopping items from server: ${err}`);
+      return null;
+    }
+  },
+
   async loadShoppingItems(
     fridgeId: string,
     onServerUpdated?: (items: ShoppingItem[]) => void
   ): Promise<ShoppingItem[]> {
     const cached = this.getCachedShoppingItems(fridgeId);
-    api.getShoppingItems(fridgeId).then((res) => {
-      if (res.success && res.data?.items) {
-        this.saveShoppingItemsLocally(fridgeId, res.data.items);
-        if (onServerUpdated) {
-          onServerUpdated(res.data.items);
-        }
+    this.fetchAndSyncShoppingItems(fridgeId).then((items) => {
+      if (items && onServerUpdated) {
+        onServerUpdated(items);
       }
-    }).catch((err) => {
-      logger.warn('STORAGE', `Failed fetching shopping items from server: ${err}`);
     });
     return cached;
   },

@@ -79,8 +79,11 @@ export const DiagnosticsDrawer: React.FC<DiagnosticsDrawerProps> = ({ open, onOp
     try {
       const fridges = await storage.syncFridges();
       if (fridges.length > 0) {
+        const targetId = storage.getActiveFridgeId() || fridges[0].id;
+        const prods = await storage.fetchAndSyncProducts(targetId);
         haptic.notification('success');
-        logger.sync(`Manual sync success: found ${fridges.length} fridges`);
+        logger.sync(`Manual sync success: found ${fridges.length} fridges, loaded ${prods?.length ?? 0} products`);
+        window.location.reload();
       } else {
         haptic.notification('warning');
         logger.warn('DIAGNOSTICS', 'Manual sync returned 0 fridges');
@@ -88,6 +91,19 @@ export const DiagnosticsDrawer: React.FC<DiagnosticsDrawerProps> = ({ open, onOp
     } catch (err) {
       haptic.notification('error');
       logger.error('DIAGNOSTICS', `Manual sync error: ${err}`);
+    }
+  };
+
+  const handleHardReset = () => {
+    haptic.notification('warning');
+    if (window.confirm('Сбросить локальный кэш и принудительно перезагрузить данные из облака?')) {
+      const activeId = storage.getActiveFridgeId();
+      if (activeId) {
+        localStorage.removeItem(`smart_fridge_products_${activeId}`);
+        localStorage.removeItem(`smart_fridge_shopping_${activeId}`);
+      }
+      localStorage.removeItem('smart_fridge_mutation_queue');
+      window.location.reload();
     }
   };
 
@@ -158,10 +174,18 @@ export const DiagnosticsDrawer: React.FC<DiagnosticsDrawerProps> = ({ open, onOp
             <button
               type="button"
               onClick={handleManualSync}
-              className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-[#5E8B7E]/20 border border-[#5E8B7E]/30 hover:bg-[#5E8B7E]/30 text-[#A7C7E7] text-xs font-medium active:scale-95 transition-all"
+              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-[#5E8B7E]/20 border border-[#5E8B7E]/30 hover:bg-[#5E8B7E]/30 text-[#A7C7E7] text-xs font-medium active:scale-95 transition-all"
             >
               <RefreshCw className="w-3.5 h-3.5" />
               <span>Синхронизация 🔄</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleHardReset}
+              className="py-2.5 px-3 rounded-xl bg-rose-950/30 border border-rose-800/40 hover:bg-rose-900/40 text-rose-300 text-xs font-medium active:scale-95 transition-all"
+              title="Сбросить кэш и перезагрузить"
+            >
+              Сброс кэша
             </button>
           </div>
 
