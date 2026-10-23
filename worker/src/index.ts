@@ -1931,6 +1931,22 @@ export default {
                     quantity, unit, is_discrete, opened_at, expires_at, after_opening_hours,
                     notify_before_days, status, added_by, created_at, updated_at, deleted_at
                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                  ON CONFLICT(id) DO UPDATE SET
+                    fridge_id = excluded.fridge_id,
+                    name = excluded.name,
+                    canonical_name = excluded.canonical_name,
+                    category = excluded.category,
+                    barcode = excluded.barcode,
+                    storage_type = excluded.storage_type,
+                    quantity = excluded.quantity,
+                    unit = excluded.unit,
+                    is_discrete = excluded.is_discrete,
+                    opened_at = excluded.opened_at,
+                    expires_at = excluded.expires_at,
+                    after_opening_hours = excluded.after_opening_hours,
+                    notify_before_days = excluded.notify_before_days,
+                    status = excluded.status,
+                    updated_at = excluded.updated_at
                 `).bind(
                   sanitized.id, fridgeId, sanitized.name, sanitized.canonical_name, sanitized.category,
                   sanitized.barcode || null, sanitized.storage_type, sanitized.quantity, sanitized.unit,
@@ -1980,6 +1996,18 @@ export default {
                         quantity, unit, opened_at, expires_at,
                         notify_before_days, status, added_by, created_at, updated_at, deleted_at
                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                      ON CONFLICT(id) DO UPDATE SET
+                        fridge_id = excluded.fridge_id,
+                        name = excluded.name,
+                        category = excluded.category,
+                        storage_type = excluded.storage_type,
+                        quantity = excluded.quantity,
+                        unit = excluded.unit,
+                        opened_at = excluded.opened_at,
+                        expires_at = excluded.expires_at,
+                        notify_before_days = excluded.notify_before_days,
+                        status = excluded.status,
+                        updated_at = excluded.updated_at
                     `).bind(
                       p.id, fridgeId, p.name, p.category, p.storage_type,
                       p.quantity, p.unit, p.opened_at, p.expires_at,
@@ -2073,6 +2101,22 @@ export default {
                   quantity, unit, is_discrete, opened_at, expires_at, after_opening_hours,
                   notify_before_days, status, added_by, created_at, updated_at, deleted_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                ON CONFLICT(id) DO UPDATE SET
+                  fridge_id = excluded.fridge_id,
+                  name = excluded.name,
+                  canonical_name = excluded.canonical_name,
+                  category = excluded.category,
+                  barcode = excluded.barcode,
+                  storage_type = excluded.storage_type,
+                  quantity = excluded.quantity,
+                  unit = excluded.unit,
+                  is_discrete = excluded.is_discrete,
+                  opened_at = excluded.opened_at,
+                  expires_at = excluded.expires_at,
+                  after_opening_hours = excluded.after_opening_hours,
+                  notify_before_days = excluded.notify_before_days,
+                  status = excluded.status,
+                  updated_at = excluded.updated_at
               `).bind(
                 prodId, fridgeId, name, canonicalName, category, barcode, storageType,
                 quantity, unit, isDiscrete, openedAt, payload.expires_at, afterOpeningHours,
@@ -2086,6 +2130,18 @@ export default {
                   quantity, unit, opened_at, expires_at,
                   notify_before_days, status, added_by, created_at, updated_at, deleted_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                ON CONFLICT(id) DO UPDATE SET
+                  fridge_id = excluded.fridge_id,
+                  name = excluded.name,
+                  category = excluded.category,
+                  storage_type = excluded.storage_type,
+                  quantity = excluded.quantity,
+                  unit = excluded.unit,
+                  opened_at = excluded.opened_at,
+                  expires_at = excluded.expires_at,
+                  notify_before_days = excluded.notify_before_days,
+                  status = excluded.status,
+                  updated_at = excluded.updated_at
               `).bind(
                 prodId, fridgeId, name, category, storageType,
                 quantity, unit, openedAt, payload.expires_at,

@@ -797,6 +797,21 @@ describe('Cloudflare Worker Gateway & DTO Sanitizer', () => {
       expect(presetsData.success).toBe(true);
       expect(presetsData.presets.length).toBeGreaterThanOrEqual(2);
       expect(presetsData.presets.some((p: any) => p.canonical_name.includes('молоко'))).toBe(true);
+
+      // Verify idempotent batch upsert with existing product IDs
+      const reUploadRes = await worker.fetch(new Request(`https://edge.fridge.tma/api/fridges/${fridgeId}/products/batch`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `tma ${initDataA}`,
+        },
+        body: JSON.stringify({
+          items: batchData.products,
+        }),
+      }), env);
+      expect(reUploadRes.status).toBe(201);
+      const reUploadData = await reUploadRes.json() as any;
+      expect(reUploadData.success).toBe(true);
     });
 
     it('should handle partial product consumption via delta_consumed', async () => {

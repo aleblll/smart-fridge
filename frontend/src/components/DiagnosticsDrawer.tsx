@@ -171,9 +171,8 @@ export const DiagnosticsDrawer: React.FC<DiagnosticsDrawerProps> = ({ open, onOp
       const res = await api.addProductsBatch(activeFridgeId, activeLocals);
       if (res.success) {
         haptic.notification('success');
-        setTestResult(`Выгружено ${res.data?.count ?? activeLocals.length} продуктов в D1! 🌿`);
+        setTestResult(`Синхронизировано ${res.data?.count ?? activeLocals.length} продуктов с D1! 🌿`);
         await storage.fetchAndSyncProducts(activeFridgeId);
-        window.location.reload();
       } else {
         haptic.notification('error');
         setTestResult(`Ошибка выгрузки: ${res.error || 'Сбой D1'}`);
@@ -311,7 +310,7 @@ export const DiagnosticsDrawer: React.FC<DiagnosticsDrawerProps> = ({ open, onOp
               className="w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-gradient-to-r from-[#5E8B7E] to-[#486e63] hover:brightness-105 text-[#F1F5F4] text-xs font-semibold active:scale-95 transition-all shadow-md shadow-[#5E8B7E]/20 disabled:opacity-50"
             >
               <CloudUpload className="w-4 h-4" />
-              <span>{isPushingLocals ? 'Выгрузка в D1...' : `Выгрузить ${activeLocals.length} локальных продуктов в облако ☁️`}</span>
+              <span>{isPushingLocals ? 'Синхронизация с D1...' : `Синхронизировать ${activeLocals.length} продуктов с облаком ☁️`}</span>
             </button>
           )}
 
