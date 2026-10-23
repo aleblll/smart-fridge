@@ -618,7 +618,12 @@ const ALLOWED_ORIGINS = new Set([
 
 export function getCorsHeaders(request?: Request): Record<string, string> {
   const origin = request?.headers?.get('Origin') || '';
-  const allowedOrigin = ALLOWED_ORIGINS.has(origin) ? origin : 'https://aleblll.github.io';
+  let allowedOrigin = 'https://aleblll.github.io';
+  if (origin && (ALLOWED_ORIGINS.has(origin) || origin.startsWith('https://aleblll.github.io') || origin.startsWith('android-app://') || origin.includes('telegram'))) {
+    allowedOrigin = origin;
+  } else if (!origin || origin === 'null') {
+    allowedOrigin = '*';
+  }
   return {
     'Access-Control-Allow-Origin': allowedOrigin,
     'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
@@ -1277,7 +1282,7 @@ export default {
         return jsonResponse({ error: 'Bot token not configured on server', code: 'SERVER_MISCONFIG' }, 500, corsHeaders);
       }
 
-      const maxAuthAge = env.ENVIRONMENT === 'test' ? 3600 : 86400 * 7;
+      const maxAuthAge = env.ENVIRONMENT === 'test' ? 3600 : 86400 * 30;
       const authResult = await verifyTelegramAuth(initDataRaw, botToken, maxAuthAge);
       if (authResult.error === 'AUTH_EXPIRED') {
         return jsonResponse({ error: 'Auth date expired', code: 'AUTH_EXPIRED' }, 401, corsHeaders);
@@ -1311,7 +1316,7 @@ export default {
       return jsonResponse({ error: 'Bot token not configured on server', code: 'SERVER_MISCONFIG' }, 500, corsHeaders);
     }
 
-    const maxAuthAge = env.ENVIRONMENT === 'test' ? 3600 : 86400 * 7;
+    const maxAuthAge = env.ENVIRONMENT === 'test' ? 3600 : 86400 * 30;
     const authResult = await verifyTelegramAuth(initDataHeader, botToken, maxAuthAge);
     if (authResult.error === 'AUTH_EXPIRED') {
       console.warn('[Worker Auth] 401 AUTH_EXPIRED for user request');

@@ -28,26 +28,37 @@ export function getTelegramInitData(): string {
   // 2. Query / Hash parameters
   if (!found) {
     try {
-      const urlParams = new URLSearchParams(window.location.search);
-      const tgInitData = urlParams.get('tgWebAppData');
-      if (tgInitData) found = tgInitData;
+      const searchRaw = window.location.search.startsWith('?')
+        ? window.location.search.slice(1)
+        : window.location.search;
+      const hashRaw = window.location.hash.startsWith('#')
+        ? window.location.hash.slice(1)
+        : window.location.hash;
 
-      if (!found) {
-        const hash = window.location.hash.startsWith('#')
-          ? window.location.hash.slice(1)
-          : window.location.hash;
-        const hashParams = new URLSearchParams(hash);
-        const hashInitData = hashParams.get('tgWebAppData');
-        if (hashInitData) {
-          found = hashInitData;
-        } else if (hash.includes('hash=') && hash.includes('auth_date=')) {
-          // Direct hash containing initData fields
-          found = hash;
+      const sources = [searchRaw, hashRaw];
+      for (const raw of sources) {
+        if (!raw) continue;
+        // Direct tgWebAppData parameter extraction
+        const match = raw.match(/tgWebAppData=([^&]+)/);
+        if (match && match[1]) {
+          try {
+            const decoded = decodeURIComponent(match[1]);
+            if (decoded.includes('hash=')) {
+              found = decoded;
+              break;
+            }
+          } catch {
+            // Ignore URI malformed errors
+          }
         }
-      }
-
-      if (!found && window.location.search.includes('hash=') && window.location.search.includes('auth_date=')) {
-        found = window.location.search.slice(1);
+        // Direct hash containing initData fields
+        if (raw.includes('hash=') && raw.includes('auth_date=')) {
+          const parts = raw.split('&').filter((p) => !p.startsWith('tgWebApp'));
+          if (parts.length > 0) {
+            found = parts.join('&');
+            break;
+          }
+        }
       }
     } catch {
       // ignore URL parsing errors
@@ -60,7 +71,7 @@ export function getTelegramInitData(): string {
   }
 
   // 3. Cache persistence (both sessionStorage and localStorage to survive mobile webview reloads)
-  if (found) {
+  if (found && found.includes('hash=')) {
     try {
       sessionStorage.setItem(CACHED_INIT_DATA_KEY, found);
       localStorage.setItem(CACHED_INIT_DATA_KEY, found);
@@ -73,14 +84,14 @@ export function getTelegramInitData(): string {
   // 4. Fallback to cached value from current session or previous visit
   try {
     const sessionCached = sessionStorage.getItem(CACHED_INIT_DATA_KEY);
-    if (sessionCached) return sessionCached;
+    if (sessionCached && sessionCached.includes('hash=')) return sessionCached;
     const localCached = localStorage.getItem(CACHED_INIT_DATA_KEY);
-    if (localCached) return localCached;
+    if (localCached && localCached.includes('hash=')) return localCached;
   } catch {
     // ignore storage read errors
   }
 
-  return '';
+  return found || '';
 }
 
 export const PRIMARY_WORKER_API = 'https://smart-fridge-edge-gateway.aghaskdbbb.workers.dev/api';
@@ -117,12 +128,13 @@ async function request<T>(
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> {
   const initData = getTelegramInitData();
+  const safeInitData = initData ? encodeURI(initData) : '';
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
-    ...(initData
+    ...(safeInitData
       ? {
-          'X-Telegram-Init-Data': initData,
-          Authorization: `tma ${initData}`,
+          'X-Telegram-Init-Data': safeInitData,
+          Authorization: `tma ${safeInitData}`,
         }
       : {}),
     ...options.headers,
@@ -165,6 +177,15 @@ async function request<T>(
 }
 
 export const api = {
+  /**
+   * Check Cloudflare Worker health status
+   */
+  async checkHealth(): Promise<ApiResponse<{ status: string; timestamp?: string }>> {
+    return request<{ status: string; timestamp?: string }>('/health', {
+      method: 'GET',
+    });
+  },
+
   /**
    * Validate Telegram initData HMAC hash and obtain session info
    */

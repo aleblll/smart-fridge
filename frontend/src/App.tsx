@@ -337,6 +337,7 @@ function MainScreen() {
 
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncState, setSyncState] = useState<'connected' | 'syncing' | 'offline'>('connected');
+  const [lastSyncError, setLastSyncError] = useState<string | null>(null);
 
   // Background refresh helper: resolves active fridge, drains queue, and pulls latest state from D1
   const refreshProducts = useCallback(async (isManual = false) => {
@@ -365,15 +366,18 @@ function MainScreen() {
           const processed = applyProductsWithAutoDiscard(serverProducts, targetId);
           setProducts(processed);
           setSyncState('connected');
+          setLastSyncError(null);
           if (isManual) {
             haptic.notification('success');
             showToast('Облачная синхронизация выполнена 🌿');
           }
         } else {
+          const err = storage.getLastSyncError() || 'Сервер временно недоступен';
           setSyncState('offline');
+          setLastSyncError(err);
           if (isManual) {
             haptic.notification('warning');
-            showToast('Облако временно недоступно. Используются локальные данные 📦');
+            showToast(`Офлайн: ${err} 📦`);
           }
         }
 
@@ -383,14 +387,18 @@ function MainScreen() {
           setShoppingItems(serverShopping);
         }
       } else {
+        const err = storage.getLastSyncError() || 'Холодильник не выбран';
         setSyncState('offline');
+        setLastSyncError(err);
       }
     } catch (e) {
-      logger.warn('STORAGE', `Refresh failed: ${e instanceof Error ? e.message : String(e)}`);
+      const errMsg = e instanceof Error ? e.message : String(e);
+      logger.warn('STORAGE', `Refresh failed: ${errMsg}`);
       setSyncState('offline');
+      setLastSyncError(errMsg);
       if (isManual) {
         haptic.notification('error');
-        showToast('Ошибка при синхронизации с сервером');
+        showToast(`Ошибка синхронизации: ${errMsg}`);
       }
     } finally {
       setIsSyncing(false);
@@ -1058,7 +1066,7 @@ function MainScreen() {
               ? 'Свежесть v1.2 • Облако подключено 🌿'
               : syncState === 'syncing'
               ? 'Свежесть v1.2 • Синхронизация... ⏳'
-              : 'Свежесть v1.2 • Офлайн-режим 📦'}
+              : `Свежесть v1.2 • Офлайн: ${lastSyncError || 'локальные данные'} 📦`}
           </span>
         </button>
       </footer>

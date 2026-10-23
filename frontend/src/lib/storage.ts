@@ -25,6 +25,12 @@ function getProductsCacheKey(fridgeId: string): string {
 }
 
 export const storage = {
+  lastSyncError: null as string | null,
+
+  getLastSyncError(): string | null {
+    return this.lastSyncError;
+  },
+
   /**
    * Get active fridge ID from localStorage
    */
@@ -86,6 +92,7 @@ export const storage = {
     try {
       const res = await api.getMyFridges();
       if (res.success && res.data?.fridges) {
+        this.lastSyncError = null;
         const fridges = res.data.fridges;
         this.saveCachedFridges(fridges);
 
@@ -97,9 +104,14 @@ export const storage = {
           }
         }
         return fridges;
+      } else {
+        const errMsg = res.error || 'Ошибка загрузки списка холодильников';
+        this.lastSyncError = errMsg;
       }
     } catch (e) {
-      logger.warn('STORAGE', `syncFridges network exception: ${e instanceof Error ? e.message : String(e)}`);
+      const errMsg = e instanceof Error ? e.message : String(e);
+      this.lastSyncError = errMsg;
+      logger.warn('STORAGE', `syncFridges network exception: ${errMsg}`);
     }
 
     // Offline fallback to cached list
@@ -201,8 +213,45 @@ export const storage = {
     try {
       const res = await api.getFridgeProducts(fridgeId);
       if (res.success && res.data?.products) {
+        this.lastSyncError = null;
         const serverProducts = res.data.products;
         logger.sync(`Loaded ${serverProducts.length} products from D1 for fridge ${fridgeId}`);
+
+        // Bi-directional reconciliation: protect locally entered items that haven't reached D1 yet
+        const localProducts = this.getInitialProducts(fridgeId) || [];
+        const serverIds = new Set(serverProducts.map((p) => p.id));
+        const unsyncedLocals = localProducts.filter(
+          (p) => p.status === 'active' && !serverIds.has(p.id) && !p.id.startsWith('demo-')
+        );
+
+        if (unsyncedLocals.length > 0) {
+          logger.info('SYNC', `Reconciling ${unsyncedLocals.length} local products not present on D1 server to cloud...`);
+          try {
+            const chunkSize = 40;
+            for (let i = 0; i < unsyncedLocals.length; i += chunkSize) {
+              const chunk = unsyncedLocals.slice(i, i + chunkSize);
+              const batchRes = await api.addProductsBatch(fridgeId, chunk);
+              if (batchRes.success && batchRes.data?.products) {
+                for (const created of batchRes.data.products) {
+                  serverProducts.push(created);
+                }
+              } else {
+                for (const item of chunk) {
+                  if (!serverProducts.some((p) => p.id === item.id)) {
+                    serverProducts.push(item);
+                  }
+                }
+              }
+            }
+          } catch (batchErr) {
+            logger.warn('SYNC', `Batch reconciliation error: ${batchErr}`);
+            for (const item of unsyncedLocals) {
+              if (!serverProducts.some((p) => p.id === item.id)) {
+                serverProducts.push(item);
+              }
+            }
+          }
+        }
 
         // One-time legacy migration check
         const legacyCandidates = this.consumeLegacyProductsForMigration();
@@ -223,16 +272,20 @@ export const storage = {
         this.saveProductsLocally(fridgeId, serverProducts);
         return serverProducts;
       } else {
+        const errMsg = res.error || 'Ошибка ответа D1';
+        this.lastSyncError = errMsg;
         logger.warn(
           'STORAGE',
-          `Server load failed or offline: ${res.error || 'network issue'}. Retaining local cache.`
+          `Server load failed or offline: ${errMsg}. Retaining local cache.`
         );
         return null;
       }
     } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      this.lastSyncError = errMsg;
       logger.warn(
         'STORAGE',
-        `Network error during fetch: ${err instanceof Error ? err.message : String(err)}. Retaining local cache.`
+        `Network error during fetch: ${errMsg}. Retaining local cache.`
       );
       return null;
     }
