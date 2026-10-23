@@ -649,6 +649,50 @@ export function getDb(env: Env): D1Database {
   return getInMemoryD1();
 }
 
+let schemaEnsured = false;
+export async function ensureD1Schema(db: D1Database): Promise<void> {
+  if (schemaEnsured) return;
+  try {
+    const colInfo = await db.prepare('PRAGMA table_info(products)').all<any>();
+    const existingCols = new Set((colInfo.results || []).map((c: any) => c.name));
+
+    if (!existingCols.has('canonical_name')) {
+      try {
+        await db.exec("ALTER TABLE products ADD COLUMN canonical_name TEXT NOT NULL COLLATE NOCASE DEFAULT '';");
+        await db.exec("UPDATE products SET canonical_name = LOWER(name) WHERE canonical_name = '';");
+      } catch (e) {
+        console.warn('[D1 Migration] canonical_name alter error:', e);
+      }
+    }
+    if (!existingCols.has('barcode')) {
+      try {
+        await db.exec("ALTER TABLE products ADD COLUMN barcode TEXT;");
+      } catch (e) {
+        console.warn('[D1 Migration] barcode alter error:', e);
+      }
+    }
+    if (!existingCols.has('is_discrete')) {
+      try {
+        await db.exec("ALTER TABLE products ADD COLUMN is_discrete INTEGER NOT NULL DEFAULT 1;");
+      } catch (e) {
+        console.warn('[D1 Migration] is_discrete alter error:', e);
+      }
+    }
+    if (!existingCols.has('after_opening_hours')) {
+      try {
+        await db.exec("ALTER TABLE products ADD COLUMN after_opening_hours INTEGER;");
+      } catch (e) {
+        console.warn('[D1 Migration] after_opening_hours alter error:', e);
+      }
+    }
+
+    schemaEnsured = true;
+    console.log('[Worker D1] Schema columns validated and migrated successfully.');
+  } catch (err) {
+    console.error('[Worker D1] ensureD1Schema error:', err);
+  }
+}
+
 // In-memory legacy fallback store (for backwards compatibility if needed)
 export const memoryStore = new Map<string, any>();
 
@@ -1134,6 +1178,7 @@ export default {
     }
 
     const db = getDb(env);
+    await ensureD1Schema(db);
     const botToken = (env.TELEGRAM_BOT_TOKEN || (env as any).BOT_TOKEN || '').trim();
 
     // ==========================================
@@ -1830,11 +1875,30 @@ export default {
 
         // Route: GET /api/fridges/:id/products
         if (request.method === 'GET' && !productId) {
-          const productsRes = await db.prepare(
-            'SELECT id, fridge_id, name, canonical_name, category, barcode, storage_type, quantity, unit, is_discrete, opened_at, expires_at, after_opening_hours, notify_before_days, status, added_by, created_at, updated_at FROM products WHERE fridge_id = ? AND deleted_at IS NULL ORDER BY expires_at ASC'
-          ).bind(fridgeId).all<any>();
-          const products = productsRes.results || [];
-          return jsonResponse({ success: true, products }, 200, corsHeaders);
+          try {
+            const productsRes = await db.prepare(
+              'SELECT id, fridge_id, name, canonical_name, category, barcode, storage_type, quantity, unit, is_discrete, opened_at, expires_at, after_opening_hours, notify_before_days, status, added_by, created_at, updated_at FROM products WHERE fridge_id = ? AND deleted_at IS NULL ORDER BY expires_at ASC'
+            ).bind(fridgeId).all<any>();
+            const products = productsRes.results || [];
+            return jsonResponse({ success: true, products }, 200, corsHeaders);
+          } catch (e: any) {
+            console.error('[Worker Products] GET products error, falling back:', e);
+            try {
+              const fallbackRes = await db.prepare(
+                'SELECT id, fridge_id, name, category, storage_type, quantity, unit, opened_at, expires_at, notify_before_days, status, added_by, created_at, updated_at FROM products WHERE fridge_id = ? AND deleted_at IS NULL ORDER BY expires_at ASC'
+              ).bind(fridgeId).all<any>();
+              const products = (fallbackRes.results || []).map((p: any) => ({
+                ...p,
+                canonical_name: p.name ? p.name.toLowerCase() : '',
+                is_discrete: 1,
+                barcode: null,
+                after_opening_hours: null
+              }));
+              return jsonResponse({ success: true, products }, 200, corsHeaders);
+            } catch (err2: any) {
+              return jsonResponse({ error: e.message || 'Failed to fetch products', code: 'DATABASE_ERROR' }, 500, corsHeaders);
+            }
+          }
         }
 
         // Route: POST /api/fridges/:id/products/batch
@@ -1903,7 +1967,28 @@ export default {
             }
 
             if (stmts.length > 0) {
-              await db.batch(stmts);
+              try {
+                await db.batch(stmts);
+              } catch (batchErr: any) {
+                console.warn('[Worker Batch] Primary batch failed, attempting legacy fallback:', batchErr);
+                const fallbackStmts: D1PreparedStatement[] = [];
+                for (const p of createdProducts) {
+                  fallbackStmts.push(
+                    db.prepare(`
+                      INSERT INTO products (
+                        id, fridge_id, name, category, storage_type,
+                        quantity, unit, opened_at, expires_at,
+                        notify_before_days, status, added_by, created_at, updated_at, deleted_at
+                      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                    `).bind(
+                      p.id, fridgeId, p.name, p.category, p.storage_type,
+                      p.quantity, p.unit, p.opened_at, p.expires_at,
+                      p.notify_before_days, p.status, authUserId, now, now
+                    )
+                  );
+                }
+                await db.batch(fallbackStmts);
+              }
             }
 
             return jsonResponse({ success: true, count: createdProducts.length, products: createdProducts }, 201, corsHeaders);
@@ -1981,17 +2066,32 @@ export default {
 
             const now = new Date().toISOString();
 
-            await db.prepare(`
-              INSERT INTO products (
-                id, fridge_id, name, canonical_name, category, barcode, storage_type,
-                quantity, unit, is_discrete, opened_at, expires_at, after_opening_hours,
-                notify_before_days, status, added_by, created_at, updated_at, deleted_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
-            `).bind(
-              prodId, fridgeId, name, canonicalName, category, barcode, storageType,
-              quantity, unit, isDiscrete, openedAt, payload.expires_at, afterOpeningHours,
-              notifyBeforeDays, status, authUserId, now, now
-            ).run();
+            try {
+              await db.prepare(`
+                INSERT INTO products (
+                  id, fridge_id, name, canonical_name, category, barcode, storage_type,
+                  quantity, unit, is_discrete, opened_at, expires_at, after_opening_hours,
+                  notify_before_days, status, added_by, created_at, updated_at, deleted_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+              `).bind(
+                prodId, fridgeId, name, canonicalName, category, barcode, storageType,
+                quantity, unit, isDiscrete, openedAt, payload.expires_at, afterOpeningHours,
+                notifyBeforeDays, status, authUserId, now, now
+              ).run();
+            } catch (insErr: any) {
+              console.warn('[Worker Single Insert] Primary insert failed, attempting legacy fallback:', insErr);
+              await db.prepare(`
+                INSERT INTO products (
+                  id, fridge_id, name, category, storage_type,
+                  quantity, unit, opened_at, expires_at,
+                  notify_before_days, status, added_by, created_at, updated_at, deleted_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+              `).bind(
+                prodId, fridgeId, name, category, storageType,
+                quantity, unit, openedAt, payload.expires_at,
+                notifyBeforeDays, status, authUserId, now, now
+              ).run();
+            }
 
             const createdProduct: ProductItem = {
               id: prodId,
