@@ -128,7 +128,8 @@ async function request<T>(
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> {
   const initData = getTelegramInitData();
-  const safeInitData = initData ? encodeURI(initData) : '';
+  const hasNonAscii = initData ? Array.from(initData).some((c) => c.charCodeAt(0) > 127) : false;
+  const safeInitData = hasNonAscii ? encodeURI(initData) : initData;
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
     ...(safeInitData

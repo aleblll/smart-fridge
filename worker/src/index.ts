@@ -386,14 +386,33 @@ export async function verifyTelegramAuth(initDataRaw: string, botToken: string, 
 
   try {
     let cleanRaw = initDataRaw.trim();
+    if (cleanRaw.startsWith('tma ')) {
+      cleanRaw = cleanRaw.slice(4).trim();
+    }
+    if (cleanRaw.startsWith('#')) {
+      cleanRaw = cleanRaw.slice(1).trim();
+    }
     if (!cleanRaw.includes('hash=') && (cleanRaw.includes('%3D') || cleanRaw.includes('%26'))) {
       try {
         cleanRaw = decodeURIComponent(cleanRaw);
       } catch {}
     }
+    // Handle %25 from encodeURI
+    if (cleanRaw.includes('%25')) {
+      try {
+        cleanRaw = decodeURIComponent(cleanRaw);
+      } catch {}
+    }
 
-    const urlParams = new URLSearchParams(cleanRaw);
-    const hash = urlParams.get('hash');
+    let urlParams = new URLSearchParams(cleanRaw);
+    let hash = urlParams.get('hash');
+    if (!hash && cleanRaw.includes('%3D')) {
+      try {
+        cleanRaw = decodeURIComponent(cleanRaw);
+        urlParams = new URLSearchParams(cleanRaw);
+        hash = urlParams.get('hash');
+      } catch {}
+    }
     if (!hash) return { user: null, error: 'INVALID_SIGNATURE' };
 
     // Prepare Web Crypto HMAC keys
@@ -422,39 +441,67 @@ export async function verifyTelegramAuth(initDataRaw: string, botToken: string, 
         .join('');
     };
 
-    // 1. Check with signature removed (standard Telegram WebApp / Bot API 8.0)
-    const paramsWithoutSig: string[] = [];
+    // Candidate 1: Standard Telegram WebApp with decoded JSON parameters
+    const params1: string[] = [];
     for (const [key, value] of urlParams.entries()) {
       if (key !== 'hash' && key !== 'signature') {
-        paramsWithoutSig.push(`${key}=${value}`);
+        let val = value;
+        if (val.includes('%7B') || val.includes('%22') || val.includes('%3A')) {
+          try {
+            val = decodeURIComponent(val);
+          } catch {}
+        }
+        params1.push(`${key}=${val}`);
       }
     }
-    paramsWithoutSig.sort();
-    const checkString1 = paramsWithoutSig.join('\n');
+    params1.sort();
+    const checkString1 = params1.join('\n');
     const hash1 = await computeHexHash(checkString1);
 
     let isValid = timingSafeCompare(hash1.toLowerCase(), hash.toLowerCase());
 
-    // 2. If not matched and signature was present, also try with signature included
-    if (!isValid && urlParams.has('signature')) {
-      const paramsWithSig: string[] = [];
+    // Candidate 2: Raw urlParams values without secondary decode
+    let hash2 = '';
+    if (!isValid) {
+      const params2: string[] = [];
       for (const [key, value] of urlParams.entries()) {
-        if (key !== 'hash') {
-          paramsWithSig.push(`${key}=${value}`);
+        if (key !== 'hash' && key !== 'signature') {
+          params2.push(`${key}=${value}`);
         }
       }
-      paramsWithSig.sort();
-      const checkString2 = paramsWithSig.join('\n');
-      const hash2 = await computeHexHash(checkString2);
+      params2.sort();
+      const checkString2 = params2.join('\n');
+      hash2 = await computeHexHash(checkString2);
       isValid = timingSafeCompare(hash2.toLowerCase(), hash.toLowerCase());
+    }
+
+    // Candidate 3: With signature included
+    if (!isValid && urlParams.has('signature')) {
+      const params3: string[] = [];
+      for (const [key, value] of urlParams.entries()) {
+        if (key !== 'hash') {
+          let val = value;
+          if (val.includes('%7B') || val.includes('%22')) {
+            try {
+              val = decodeURIComponent(val);
+            } catch {}
+          }
+          params3.push(`${key}=${val}`);
+        }
+      }
+      params3.sort();
+      const checkString3 = params3.join('\n');
+      const hash3 = await computeHexHash(checkString3);
+      isValid = timingSafeCompare(hash3.toLowerCase(), hash.toLowerCase());
     }
 
     if (!isValid) {
       console.warn('[Worker Auth] 401 INVALID_SIGNATURE', {
         tokenLen: cleanToken.length,
         receivedHash: hash.slice(0, 8),
-        computedHash: hash1.slice(0, 8),
-        paramKeys: paramsWithoutSig.map(p => p.split('=')[0])
+        computedHash1: hash1.slice(0, 8),
+        computedHash2: hash2 ? hash2.slice(0, 8) : undefined,
+        paramKeys: params1.map(p => p.split('=')[0])
       });
       return { user: null, error: 'INVALID_SIGNATURE' };
     }
@@ -1093,11 +1140,26 @@ export default {
     // Health Check & Automatic Webhook Setup
     // ==========================================
     if (normalizedPath === '/api/health' || normalizedPath === '/health') {
+      let botUsername: string | null = null;
+      let botId: number | null = null;
+      if (botToken) {
+        try {
+          const meRes = await fetch(`https://api.telegram.org/bot${botToken}/getMe`);
+          const meData = await meRes.json() as any;
+          if (meData?.ok) {
+            botUsername = meData.result?.username || null;
+            botId = meData.result?.id || null;
+          }
+        } catch {}
+      }
+
       return jsonResponse({
         status: 'ok',
         version: '1.2.0',
         subdomain: url.host,
         hasBotToken: Boolean(botToken),
+        botUsername,
+        botId,
         hasDb: Boolean(db),
         time: new Date().toISOString()
       }, 200, corsHeaders);
