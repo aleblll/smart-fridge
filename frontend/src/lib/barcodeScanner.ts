@@ -34,26 +34,73 @@ const CATEGORY_SHELF_LIFE_FALLBACKS: Array<{
 export function openTelegramBarcodeScanner(): Promise<string | null> {
   return new Promise((resolve) => {
     const tg = (window as any).Telegram?.WebApp;
-    if (tg?.showScanQrPopup) {
+    if (!tg?.showScanQrPopup) {
+      resolve(null);
+      return;
+    }
+
+    let isDone = false;
+    const finish = (result: string | null) => {
+      if (isDone) return;
+      isDone = true;
+      try {
+        tg.offEvent?.('scanQrPopupClosed', handleClosed);
+      } catch (e) {
+        void e;
+      }
+      resolve(result);
+    };
+
+    const handleClosed = () => {
+      finish(null);
+    };
+
+    try {
+      tg.onEvent?.('scanQrPopupClosed', handleClosed);
+    } catch (e) {
+      void e;
+    }
+
+    try {
       tg.showScanQrPopup(
-        { text: 'Наведите камеру на штрихкод упаковки' },
+        { text: 'Наведите камеру на штрихкод или QR-код товара' },
         (scannedText: string) => {
-          const cleanCode = scannedText?.trim();
-          if (cleanCode && /^\d{8,14}$/.test(cleanCode)) {
+          const raw = scannedText?.trim();
+          if (!raw) return false;
+
+          // 1. Direct standard digits: EAN-13, EAN-8, UPC (8-14 digits)
+          const digitsMatch = raw.match(/\b\d{8,14}\b/);
+          let extractedBarcode = '';
+
+          if (digitsMatch) {
+            extractedBarcode = digitsMatch[0];
+          } else if (/^01\d{14}/.test(raw)) {
+            // 2. Russian "Честный Знак" / GS1 DataMatrix (dairy, water, pharmacy)
+            // Starts with 01 + 14-digit GTIN. EAN-13 is usually digits 3-15 or GTIN without leading 0
+            const gtin = raw.slice(2, 16);
+            extractedBarcode = gtin.startsWith('0') ? gtin.slice(1) : gtin;
+          } else if (raw.length >= 4 && raw.length <= 64) {
+            // 3. Any other alphanumeric barcode / QR code
+            extractedBarcode = raw;
+          }
+
+          if (extractedBarcode) {
             try {
-              tg.closeScanQrPopup();
+              tg.closeScanQrPopup?.();
             } catch (e) {
               void e;
             }
             triggerHapticNotification('success');
-            resolve(cleanCode);
+            finish(extractedBarcode);
             return true;
           }
-          return false; // Продолжаем сканировать, если это не EAN-8/EAN-13
+
+          return false;
         }
       );
-    } else {
-      resolve(null);
+    } catch (e) {
+      console.warn('showScanQrPopup error:', e);
+      finish(null);
     }
   });
 }
@@ -78,7 +125,8 @@ export async function resolveProductByBarcode(
   // 2. Бесплатный запрос в открытую базу OpenFoodFacts API
   try {
     const res = await fetch(
-      `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(barcode)}.json?fields=product_name,product_name_ru,categories,categories_tags`
+      `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(barcode)}.json?fields=product_name,product_name_ru,categories,categories_tags`,
+      { signal: AbortSignal.timeout(3500) }
     );
     if (res.ok) {
       const data = await res.json();

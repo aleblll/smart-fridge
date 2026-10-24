@@ -5,7 +5,8 @@ import worker, {
   sanitizeProductItem,
   checkRateLimit,
   timingSafeCompare,
-  resetInMemoryD1
+  resetInMemoryD1,
+  getInMemoryD1,
 } from '../../worker/src/index';
 
 // Helper to generate valid Telegram initData signature using Web Crypto
@@ -691,6 +692,40 @@ describe('Cloudflare Worker Gateway & DTO Sanitizer', () => {
       expect(resValid.status).toBe(200);
       const dataValid = await resValid.json() as any;
       expect(dataValid.ok).toBe(true);
+    });
+
+    it('Webhook should claim invite code from /start command and join fridge', async () => {
+      const db = getInMemoryD1();
+      const now = new Date().toISOString();
+      const expiresAt = new Date(Date.now() + 86400000).toISOString();
+      await db.prepare('INSERT OR IGNORE INTO fridges (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)').bind(
+        'fridge-family-123', 'Семейный Холодильник Тест', now, now
+      ).run();
+      await db.prepare('INSERT OR REPLACE INTO invites (code, fridge_id, created_by, max_uses, uses_count, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(
+        'invite-family-code', 'fridge-family-123', 111, 5, 0, expiresAt, now
+      ).run();
+
+      const req = new Request('https://edge.fridge.tma/api/telegram-webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: {
+            chat: { id: 555666 },
+            from: { id: 555666, first_name: 'InvitedMember' },
+            text: '/start fridge_invite-family-code',
+          },
+        }),
+      });
+
+      const res = await worker.fetch(req, env);
+      expect(res.status).toBe(200);
+
+      // Verify member is added to fridge_members
+      const member = await db.prepare('SELECT role FROM fridge_members WHERE fridge_id = ? AND user_id = ?').bind(
+        'fridge-family-123', 555666
+      ).first<any>();
+      expect(member).toBeDefined();
+      expect(member?.role).toBe('member');
     });
 
     it('Webhook setup route should require CRON_SECRET', async () => {

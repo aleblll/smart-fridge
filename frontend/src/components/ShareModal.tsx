@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import QRCode from 'qrcode';
 import { api } from '@/lib/api';
 import { haptic } from '@/lib/haptics';
 import { safeCopyToClipboard } from '@/lib/clipboard';
@@ -21,6 +22,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [inviteCode, setInviteCode] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
 
   // Fetch or generate invite code on modal open
   useEffect(() => {
@@ -56,11 +58,40 @@ export const ShareModal: React.FC<ShareModalProps> = ({
     };
   }, [open, activeFridgeId]);
 
-  if (!open) return null;
-
   const inviteUrl = inviteCode
-    ? `https://t.me/Svezhestt_bot/app?startapp=${inviteCode}`
+    ? `https://t.me/Svezhestt_bot?start=fridge_${inviteCode}`
     : '';
+
+  // Generate visual QR code
+  useEffect(() => {
+    if (!inviteUrl) {
+      setQrDataUrl(null);
+      return;
+    }
+
+    let isMounted = true;
+    QRCode.toDataURL(inviteUrl, {
+      width: 280,
+      margin: 1.5,
+      color: {
+        dark: '#121615',
+        light: '#FFFFFF',
+      },
+    })
+      .then((url) => {
+        if (isMounted) setQrDataUrl(url);
+      })
+      .catch((e) => {
+        console.error('Failed to generate QR code:', e);
+        if (isMounted) setQrDataUrl(null);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [inviteUrl]);
+
+  if (!open) return null;
 
   const handleCopy = async () => {
     if (!inviteUrl) return;
@@ -126,12 +157,12 @@ export const ShareModal: React.FC<ShareModalProps> = ({
         </div>
 
         <p className="text-xs text-[#8FA39D] leading-relaxed">
-          Отправьте персональную ссылку членам семьи. При переходе холодильник автоматически синхронизируется в реальном времени.
+          Отправьте ссылку членам семьи или покажите QR-код для моментального сканирования камерой.
         </p>
 
         {/* State: Loading */}
         {loading && (
-          <div className="py-6 flex flex-col items-center justify-center gap-2.5 rounded-2xl bg-white/[0.02] border border-white/[0.06]">
+          <div className="py-8 flex flex-col items-center justify-center gap-2.5 rounded-2xl bg-white/[0.02] border border-white/[0.06]">
             <Loader2 className="w-5 h-5 text-[#5E8B7E] animate-spin" />
             <span className="text-xs text-[#8FA39D]">Создаем безопасный инвайт D1...</span>
           </div>
@@ -148,9 +179,36 @@ export const ShareModal: React.FC<ShareModalProps> = ({
           </div>
         )}
 
-        {/* State: Success Link Box */}
+        {/* State: Success Link & QR Code Box */}
         {inviteUrl && !loading && (
-          <div className="space-y-3">
+          <div className="space-y-3.5">
+            {/* Visual QR Code Display */}
+            <div className="flex flex-col items-center justify-center p-3 rounded-2xl bg-white/[0.03] border border-white/[0.08] text-center space-y-2">
+              {qrDataUrl ? (
+                <div className="p-2 bg-white rounded-2xl shadow-lg shadow-black/40">
+                  <img
+                    src={qrDataUrl}
+                    alt="QR код для подключения к холодильнику"
+                    className="w-36 h-36 rounded-xl block"
+                  />
+                </div>
+              ) : (
+                <div className="w-36 h-36 flex items-center justify-center bg-white/5 rounded-2xl">
+                  <Loader2 className="w-6 h-6 animate-spin text-[#5E8B7E]" />
+                </div>
+              )}
+              <div className="space-y-0.5">
+                <p className="text-xs font-medium text-[#F1F5F4] flex items-center justify-center gap-1.5">
+                  <QrCode className="w-3.5 h-3.5 text-[#5E8B7E]" />
+                  <span>Сканируйте камерой телефона</span>
+                </p>
+                <p className="text-[11px] text-[#8FA39D]">
+                  Другой смартфон сразу откроет общий холодильник
+                </p>
+              </div>
+            </div>
+
+            {/* Link input */}
             <div className="flex items-center gap-2 p-2.5 rounded-xl bg-white/[0.04] border border-white/[0.08] focus-within:border-[#5E8B7E]/50 transition-colors">
               <input
                 type="text"
@@ -170,7 +228,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
             </div>
 
             {/* Actions */}
-            <div className="space-y-2 pt-1">
+            <div className="space-y-2 pt-0.5">
               <button
                 type="button"
                 onClick={handleShareTelegram}
@@ -185,7 +243,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                 onClick={handleCopy}
                 className="w-full flex items-center justify-center gap-2 py-2.5 rounded-2xl bg-white/[0.06] hover:bg-white/[0.09] text-[#F1F5F4] text-xs font-medium border border-white/[0.06] active:scale-[0.985] transition-all"
               >
-                <QrCode className="w-3.5 h-3.5 text-[#8FA39D]" />
+                <Copy className="w-3.5 h-3.5 text-[#8FA39D]" />
                 <span>{copied ? 'Ссылка скопирована в буфер!' : 'Скопировать ссылку'}</span>
               </button>
             </div>

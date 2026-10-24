@@ -1187,6 +1187,9 @@ export default {
     if (normalizedPath === '/api/health' || normalizedPath === '/health') {
       let botUsername: string | null = null;
       let botId: number | null = null;
+      let webhookInfo: any = null;
+      let webhookStatus: string = 'unknown';
+
       if (botToken) {
         try {
           const meRes = await fetch(`https://api.telegram.org/bot${botToken}/getMe`);
@@ -1195,7 +1198,22 @@ export default {
             botUsername = meData.result?.username || null;
             botId = meData.result?.id || null;
           }
-        } catch {}
+
+          const targetWebhookUrl = `https://${url.host}/api/telegram-webhook`;
+          const whRes = await fetch(`https://api.telegram.org/bot${botToken}/getWebhookInfo`);
+          webhookInfo = await whRes.json() as any;
+
+          if (webhookInfo?.result?.url !== targetWebhookUrl) {
+            const secretParam = env.TELEGRAM_WEBHOOK_SECRET ? `&secret_token=${encodeURIComponent(env.TELEGRAM_WEBHOOK_SECRET)}` : '';
+            const setRes = await fetch(`https://api.telegram.org/bot${botToken}/setWebhook?url=${encodeURIComponent(targetWebhookUrl)}${secretParam}`);
+            const setData = await setRes.json() as any;
+            webhookStatus = setData?.ok ? 'auto_configured' : 'failed_to_set';
+          } else {
+            webhookStatus = 'verified';
+          }
+        } catch (e: any) {
+          webhookStatus = `error: ${e.message}`;
+        }
       }
 
       return jsonResponse({
@@ -1206,6 +1224,8 @@ export default {
         botUsername,
         botId,
         hasDb: Boolean(db),
+        webhookStatus,
+        webhookUrl: webhookInfo?.result?.url || null,
         time: new Date().toISOString()
       }, 200, corsHeaders);
     }
@@ -1307,8 +1327,50 @@ export default {
           const fromUser = message.from;
           const token = (env.TELEGRAM_BOT_TOKEN || (env as any).BOT_TOKEN || '').trim();
 
-          // If user interacted, pre-create default fridge in D1 if not existing
-          if (fromUser?.id && db) {
+          const text = (message.text || '').trim();
+          let inviteCode: string | null = null;
+          // Matches: "/start fridge_code", "/start code", "/start join_code"
+          const startMatch = text.match(/^\/start(?:@\w+)?(?:\s+(?:fridge_|join_)?([a-zA-Z0-9_-]+))?$/i);
+          if (startMatch && startMatch[1]) {
+            inviteCode = startMatch[1];
+          }
+
+          let joinedFridgeName: string | null = null;
+          let targetFridgeId: string | null = null;
+
+          if (inviteCode && fromUser?.id && db) {
+            try {
+              const invite = await db.prepare('SELECT * FROM invites WHERE code = ?').bind(inviteCode).first<any>();
+              if (invite) {
+                const isExpired = new Date(invite.expires_at).getTime() < Date.now();
+                const isLimitReached = invite.uses_count >= invite.max_uses;
+                if (!isExpired && !isLimitReached) {
+                  targetFridgeId = invite.fridge_id;
+
+                  // Add user to fridge_members
+                  const now = new Date().toISOString();
+                  await db.prepare('INSERT OR IGNORE INTO fridge_members (fridge_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)').bind(
+                    invite.fridge_id,
+                    fromUser.id,
+                    'member',
+                    now
+                  ).run();
+
+                  // Increment uses_count
+                  await db.prepare('UPDATE invites SET uses_count = uses_count + 1 WHERE code = ?').bind(inviteCode).run();
+
+                  // Fetch fridge name
+                  const fRes = await db.prepare('SELECT name FROM fridges WHERE id = ?').bind(invite.fridge_id).first<any>();
+                  joinedFridgeName = fRes?.name || 'Семейный холодильник';
+                }
+              }
+            } catch (invErr) {
+              console.warn('[Webhook] Invite claiming error:', invErr);
+            }
+          }
+
+          // If user interacted and was NOT joining another fridge, pre-create default fridge in D1 if not existing
+          if (!targetFridgeId && fromUser?.id && db) {
             try {
               const existingMember = await db.prepare(
                 'SELECT fridge_id FROM fridge_members WHERE user_id = ?'
@@ -1337,8 +1399,19 @@ export default {
           }
 
           if (token) {
-            const appUrl = 'https://aleblll.github.io/smart-fridge/?v=1.2.0';
-            const welcomeText = 'Привет! Я «Свежесть» — умный контроль продуктов и срока годности 🌿\n\nНажми кнопку ниже, чтобы открыть холодильник и синхронизировать продукты:';
+            let welcomeText = '';
+            let appUrl = 'https://aleblll.github.io/smart-fridge/?v=1.2.0';
+            let buttonText = '🌿 Открыть Холодильник';
+
+            if (joinedFridgeName && targetFridgeId) {
+              welcomeText = `🎉 <b>Вас успешно подключили к холодильнику «${joinedFridgeName}»!</b>\n\nТеперь вы и ваша семья можете вместе вести учет продуктов, следить за сроками годности и общим списком покупок 🌿\n\nНажмите кнопку ниже, чтобы открыть общий холодильник:`;
+              appUrl = `https://aleblll.github.io/smart-fridge/?v=1.2.0&fridge_id=${encodeURIComponent(targetFridgeId)}#tgWebAppStartParam=fridge_${inviteCode}`;
+              buttonText = `🌿 Открыть «${joinedFridgeName}»`;
+            } else if (inviteCode) {
+              welcomeText = `⚠️ <b>Приглашение недействительно</b> или срок его действия истек.\n\nВы можете открыть свой личный холодильник кнопкой ниже:`;
+            } else {
+              welcomeText = 'Привет! Я «Свежесть» — умный контроль продуктов и срока годности 🌿\n\nНажми кнопку ниже, чтобы открыть холодильник и синхронизировать продукты:';
+            }
 
             await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
               method: 'POST',
@@ -1346,11 +1419,12 @@ export default {
               body: JSON.stringify({
                 chat_id: chatId,
                 text: welcomeText,
+                parse_mode: 'HTML',
                 reply_markup: {
                   inline_keyboard: [
                     [
                       {
-                        text: '🌿 Открыть Холодильник',
+                        text: buttonText,
                         web_app: { url: appUrl }
                       }
                     ]

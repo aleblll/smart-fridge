@@ -265,10 +265,19 @@ function MainScreen() {
     }
 
     async function initializeApp() {
-      // 1. Check for invite code in Telegram start_param
-      const startParam = window.Telegram?.WebApp?.initDataUnsafe?.start_param;
-      if (startParam) {
-        const inviteCode = startParam.replace(/^fridge_/, '').trim();
+      // 1. Check for invite code in Telegram start_param, URL search params or URL hash
+      const urlParams = new URLSearchParams(window.location.search);
+      const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+      const directFridgeId = urlParams.get('fridge_id') || hashParams.get('fridge_id');
+
+      const rawStartParam =
+        window.Telegram?.WebApp?.initDataUnsafe?.start_param ||
+        urlParams.get('startapp') ||
+        urlParams.get('start_param') ||
+        hashParams.get('tgWebAppStartParam');
+
+      if (rawStartParam) {
+        const inviteCode = rawStartParam.replace(/^(?:fridge_|join_)/, '').trim();
         if (inviteCode) {
           logger.info('INVITE', `Claiming invite code from start_param: ${inviteCode}`);
           try {
@@ -284,6 +293,9 @@ function MainScreen() {
             logger.warn('INVITE', `Failed to claim invite: ${e instanceof Error ? e.message : String(e)}`);
           }
         }
+      } else if (directFridgeId) {
+        storage.setActiveFridgeId(directFridgeId);
+        setActiveFridgeId(directFridgeId);
       }
 
       // 2. Synchronize fridges list and inventory with multi-tier backoff

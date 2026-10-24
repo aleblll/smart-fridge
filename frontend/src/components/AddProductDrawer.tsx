@@ -148,6 +148,7 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
       }
     } catch (err) {
       logger.error('SCANNER', `Barcode scan error: ${err}`);
+      setApproximateNotice('Ошибка сканирования. Введите название вручную.');
     } finally {
       setIsScanning(false);
     }
