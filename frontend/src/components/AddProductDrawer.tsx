@@ -4,7 +4,8 @@ import { haptic } from '@/lib/haptics';
 import { searchPresets, calculateExpirationDate, getRecommendedStorage, ALL_PRESETS } from '@/lib/presets';
 import { logger } from '@/lib/logger';
 import { storage } from '@/lib/storage';
-import { openTelegramBarcodeScanner, resolveProductByBarcode } from '@/lib/barcodeScanner';
+import { resolveProductByBarcode } from '@/lib/barcodeScanner';
+import { BarcodeScannerModal } from './BarcodeScannerModal';
 import type { FoodPreset } from '@/types/presets';
 import type { ProductItem, StorageType, UnitType, FridgePresetItem } from '@/types';
 import { Plus, Minus, Check, Refrigerator, Snowflake, Archive, Search, Calendar, Sparkles, X, ScanBarcode } from 'lucide-react';
@@ -118,37 +119,39 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
   }, [open, activeFridgeId]);
 
   const [selectedPreset, setSelectedPreset] = useState<FoodPreset | null>(null);
+  const [showScannerModal, setShowScannerModal] = useState(false);
 
-  // Barcode scanner trigger via Telegram Native Camera
-  const handleScanBarcode = async () => {
+  // Barcode scanner trigger via Universal In-App Scanner
+  const handleOpenScanner = () => {
     haptic.impact('medium');
+    setShowScannerModal(true);
+  };
+
+  const handleBarcodeDetected = async (code: string) => {
+    setBarcode(code);
     setIsScanning(true);
     try {
-      const code = await openTelegramBarcodeScanner();
-      if (code) {
-        setBarcode(code);
-        const allPresetsFormatted = ALL_PRESETS.map((p) => ({
-          name: p.name,
-          category: p.category,
-          storage_type: getRecommendedStorage(p),
-          shelf_life_days: p.shelf_life_days[getRecommendedStorage(p)] || 7,
-          unit: p.default_unit,
-        }));
-        const resolved = await resolveProductByBarcode(code, allPresetsFormatted);
-        if (resolved.name) {
-          setName(resolved.name);
-          setCategory(resolved.category);
-          setStorageType(resolved.storageType);
-          setUnit(resolved.unit === 'л' ? 'l' : resolved.unit === 'кг' ? 'kg' : resolved.unit === 'г' ? 'g' : resolved.unit === 'уп' ? 'pack' : 'pcs');
-          setDays(resolved.estimatedShelfLifeDays);
-          setApproximateNotice('✨ Срок выставлен примерно — при необходимости поправьте');
-        } else {
-          setApproximateNotice(`Штрихкод ${code} распознан. Введите название.`);
-        }
+      const allPresetsFormatted = ALL_PRESETS.map((p) => ({
+        name: p.name,
+        category: p.category,
+        storage_type: getRecommendedStorage(p),
+        shelf_life_days: p.shelf_life_days[getRecommendedStorage(p)] || 7,
+        unit: p.default_unit,
+      }));
+      const resolved = await resolveProductByBarcode(code, allPresetsFormatted);
+      if (resolved.name) {
+        setName(resolved.name);
+        setCategory(resolved.category);
+        setStorageType(resolved.storageType);
+        setUnit(resolved.unit === 'л' ? 'l' : resolved.unit === 'кг' ? 'kg' : resolved.unit === 'г' ? 'g' : resolved.unit === 'уп' ? 'pack' : 'pcs');
+        setDays(resolved.estimatedShelfLifeDays);
+        setApproximateNotice('✨ Срок выставлен примерно — при необходимости поправьте');
+      } else {
+        setApproximateNotice(`Штрихкод ${code} распознан. Введите название.`);
       }
     } catch (err) {
-      logger.error('SCANNER', `Barcode scan error: ${err}`);
-      setApproximateNotice('Ошибка сканирования. Введите название вручную.');
+      logger.error('SCANNER', `Barcode resolve error: ${err}`);
+      setApproximateNotice(`Штрихкод ${code} сохранен.`);
     } finally {
       setIsScanning(false);
     }
@@ -283,15 +286,30 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
                     )}
                     <button
                       type="button"
-                      onClick={handleScanBarcode}
+                      onClick={handleOpenScanner}
                       disabled={isScanning}
-                      title="Сканировать штрихкод (EAN-13)"
+                      title="Сканировать штрихкод (EAN-13, QR, Фото)"
                       className="p-1.5 rounded-xl bg-white/[0.06] text-[#5E8B7E] hover:text-[#F1F5F4] hover:bg-[#344641] active:scale-90 transition-all flex items-center gap-1 text-[11px]"
                     >
                       <ScanBarcode className="w-4 h-4" />
                     </button>
                   </div>
                 </div>
+
+                {/* Barcode badge if detected */}
+                {barcode && (
+                  <div className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-white/[0.04] border border-white/[0.08] text-xs animate-fadeIn">
+                    <span className="text-[#8FA39D] font-mono">🏷️ Штрихкод: <strong className="text-[#A7C7E7]">{barcode}</strong></span>
+                    <button
+                      type="button"
+                      onClick={() => { setBarcode(null); setApproximateNotice(null); }}
+                      className="text-[#8FA39D] hover:text-[#EBAEB7] p-0.5"
+                      title="Удалить штрихкод"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
 
                 {/* Approximate Date Notice from Barcode Scan */}
                 {approximateNotice && (
@@ -538,6 +556,12 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
           </div>
         </Drawer.Content>
       </Drawer.Portal>
+
+      <BarcodeScannerModal
+        open={showScannerModal}
+        onClose={() => setShowScannerModal(false)}
+        onDetected={handleBarcodeDetected}
+      />
     </Drawer.Root>
   );
 };

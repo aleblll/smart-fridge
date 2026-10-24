@@ -56,6 +56,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [showPortionSelect, setShowPortionSelect] = useState(false);
+  const [customDelta, setCustomDelta] = useState('');
   const notifyThreshold = product.notify_before_days ?? 3;
   const { daysLeft, spentPercent, statusTag } = calculateFreshnessMetrics(
     product.expires_at,
@@ -333,6 +334,46 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                 </button>
               </>
             )}
+          </div>
+
+          {/* Custom portion input */}
+          <div className="flex items-center gap-1.5 pt-2 border-t border-white/[0.06] mt-2">
+            <div className="flex-1 flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-black/30 border border-white/[0.08] focus-within:border-[#5E8B7E]/50 transition-colors">
+              <input
+                type="number"
+                step={isContinuous ? '0.1' : '1'}
+                min="0.01"
+                max={product.quantity}
+                placeholder="Свое кол-во"
+                value={customDelta}
+                onChange={(e) => setCustomDelta(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    const val = Number(customDelta);
+                    if (val > 0 && val <= product.quantity) {
+                      handlePortionSelect(e as any, val);
+                      setCustomDelta('');
+                    }
+                  }
+                }}
+                className="w-full bg-transparent text-[#F1F5F4] placeholder-[#8FA39D]/60 outline-none text-xs font-mono"
+              />
+              <span className="text-[10px] text-[#8FA39D] shrink-0 font-mono">{formatUnitRu(product.unit)}</span>
+            </div>
+            <button
+              type="button"
+              disabled={!customDelta || Number(customDelta) <= 0 || Number(customDelta) > product.quantity}
+              onClick={(e) => {
+                const val = Number(customDelta);
+                if (val > 0 && val <= product.quantity) {
+                  handlePortionSelect(e, val);
+                  setCustomDelta('');
+                }
+              }}
+              className="px-3 py-1.5 rounded-lg bg-[#5E8B7E] hover:bg-[#4E756A] text-[#F1F5F4] text-xs font-semibold disabled:opacity-30 disabled:cursor-not-allowed active:scale-95 transition-all shadow-sm"
+            >
+              Съесть
+            </button>
           </div>
         </div>
       )}

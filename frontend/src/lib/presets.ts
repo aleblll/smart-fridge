@@ -10,7 +10,7 @@ export const DEFAULT_QUICK_PRESETS: FoodPreset[] = ALL_PRESETS.slice(0, 8);
 /**
  * Filter food presets by query (matches name or synonyms)
  */
-export function searchPresets(query: string, limit: number = 6): FoodPreset[] {
+export function searchPresets(query: string, limit: number = 10): FoodPreset[] {
   const clean = query.trim().toLowerCase();
   if (clean.length < 2) {
     return DEFAULT_QUICK_PRESETS.slice(0, limit);
