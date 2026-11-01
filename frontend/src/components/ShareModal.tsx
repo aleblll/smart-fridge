@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import QRCode from 'qrcode';
 import { api } from '@/lib/api';
 import { haptic } from '@/lib/haptics';
 import { safeCopyToClipboard } from '@/lib/clipboard';
-import { X, Copy, Check, Send, Users, QrCode, Loader2, AlertCircle } from 'lucide-react';
+import { X, Copy, Check, Send, Users, QrCode, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
 
 interface ShareModalProps {
   open: boolean;
@@ -24,39 +24,73 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   const [copied, setCopied] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
 
+  const getCacheKey = (fid: string) => `smart_fridge_invite_${fid}`;
+
+  const fetchInvite = useCallback(
+    (forceRefresh: boolean = false) => {
+      if (!activeFridgeId) return;
+
+      const cacheKey = getCacheKey(activeFridgeId);
+
+      // 1. Check cached invite if forceRefresh is false
+      if (!forceRefresh) {
+        try {
+          const cachedRaw = sessionStorage.getItem(cacheKey);
+          if (cachedRaw) {
+            const cached = JSON.parse(cachedRaw);
+            if (cached?.code && cached?.expires_at) {
+              const remainingMs = new Date(cached.expires_at).getTime() - Date.now();
+              // Re-use if more than 1 hour remains (3,600,000 ms)
+              if (remainingMs > 3600 * 1000) {
+                setInviteCode(cached.code);
+                setError(null);
+                return;
+              }
+            }
+          }
+        } catch {
+          // ignore cache parse errors
+        }
+      }
+
+      // 2. Fetch fresh invite code from API
+      setLoading(true);
+      setError(null);
+
+      api
+        .createInvite(activeFridgeId)
+        .then((res) => {
+          if (res.success && res.data) {
+            const code = res.data.code || res.data.invite_code;
+            const expires_at = res.data.expires_at;
+            setInviteCode(code);
+            try {
+              sessionStorage.setItem(cacheKey, JSON.stringify({ code, expires_at }));
+            } catch {
+              // ignore sessionStorage write errors
+            }
+          } else {
+            setError(res.error || 'Не удалось сгенерировать приглашение');
+          }
+        })
+        .catch((err) => {
+          setError(err instanceof Error ? err.message : 'Сетевая ошибка');
+        })
+        .finally(() => {
+          setLoading(false);
+        });
+    },
+    [activeFridgeId]
+  );
+
   // Fetch or generate invite code on modal open
   useEffect(() => {
     if (!open || !activeFridgeId) {
       return;
     }
 
-    let isMounted = true;
-    setLoading(true);
-    setError(null);
-
-    api
-      .createInvite(activeFridgeId)
-      .then((res) => {
-        if (!isMounted) return;
-        if (res.success && res.data) {
-          const code = res.data.code || res.data.invite_code;
-          setInviteCode(code);
-        } else {
-          setError(res.error || 'Не удалось сгенерировать приглашение');
-        }
-      })
-      .catch((err) => {
-        if (!isMounted) return;
-        setError(err instanceof Error ? err.message : 'Сетевая ошибка');
-      })
-      .finally(() => {
-        if (isMounted) setLoading(false);
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [open, activeFridgeId]);
+    fetchInvite(false);
+  }, [open, activeFridgeId, fetchInvite]);
 
   const inviteUrl = inviteCode
     ? `https://t.me/Svezhestt_bot?start=fridge_${inviteCode}`
@@ -170,12 +204,25 @@ export const ShareModal: React.FC<ShareModalProps> = ({
 
         {/* State: Error */}
         {error && !loading && (
-          <div className="p-3 rounded-2xl bg-rose-950/20 border border-rose-500/20 flex items-start gap-2.5 text-xs text-[#EBAEB7]">
-            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-            <div className="flex-1">
-              <p className="font-medium">Ошибка создания инвайта</p>
-              <p className="text-[11px] text-[#8FA39D] mt-0.5">{error}</p>
+          <div className="p-3 rounded-2xl bg-rose-950/20 border border-rose-500/20 space-y-2 text-xs text-[#EBAEB7]">
+            <div className="flex items-start gap-2.5">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="font-medium">Ошибка создания инвайта</p>
+                <p className="text-[11px] text-[#8FA39D] mt-0.5">{error}</p>
+              </div>
             </div>
+            <button
+              type="button"
+              onClick={() => {
+                haptic.impact('light');
+                fetchInvite(true);
+              }}
+              className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl bg-white/[0.06] text-[#F1F5F4] text-xs font-medium hover:bg-white/[0.09] active:scale-95 transition-all"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Попробовать снова</span>
+            </button>
           </div>
         )}
 
@@ -208,7 +255,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
               </div>
             </div>
 
-            {/* Link input */}
+            {/* Link input with Refresh button */}
             <div className="flex items-center gap-2 p-2.5 rounded-xl bg-white/[0.04] border border-white/[0.08] focus-within:border-[#5E8B7E]/50 transition-colors">
               <input
                 type="text"
@@ -217,6 +264,18 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                 className="flex-1 bg-transparent text-xs text-[#F1F5F4] font-mono outline-none truncate select-all"
                 title="Ссылка для приглашения"
               />
+              <button
+                type="button"
+                onClick={() => {
+                  haptic.impact('light');
+                  fetchInvite(true);
+                }}
+                disabled={loading}
+                className="p-2 rounded-lg bg-white/[0.06] text-[#8FA39D] hover:text-[#5E8B7E] active:scale-95 transition-all"
+                title="Обновить ссылку"
+              >
+                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+              </button>
               <button
                 type="button"
                 onClick={handleCopy}

@@ -36,12 +36,16 @@ class AppLogger {
 
   info(category: string, message: string, data?: unknown) {
     this.add('info', category, message, data);
-    console.log(`[${category}] ${message}`, data ?? '');
+    if (import.meta.env.DEV) {
+      console.log(`[${category}] ${message}`, data ?? '');
+    }
   }
 
   warn(category: string, message: string, data?: unknown) {
     this.add('warn', category, message, data);
-    console.warn(`[${category}] ${message}`, data ?? '');
+    if (import.meta.env.DEV) {
+      console.warn(`[${category}] ${message}`, data ?? '');
+    }
   }
 
   error(category: string, message: string, data?: unknown) {
@@ -51,7 +55,9 @@ class AppLogger {
 
   sync(message: string, data?: unknown) {
     this.add('sync', 'SYNC', message, data);
-    console.log(`[SYNC] ${message}`, data ?? '');
+    if (import.meta.env.DEV) {
+      console.log(`[SYNC] ${message}`, data ?? '');
+    }
   }
 
   getLogs(): LogEntry[] {

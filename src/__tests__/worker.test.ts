@@ -7,6 +7,7 @@ import worker, {
   timingSafeCompare,
   resetInMemoryD1,
   getInMemoryD1,
+  resetRateLimits,
 } from '../../worker/src/index';
 
 // Helper to generate valid Telegram initData signature using Web Crypto
@@ -80,6 +81,7 @@ describe('Cloudflare Worker Gateway & DTO Sanitizer', () => {
 
   beforeEach(() => {
     resetInMemoryD1();
+    resetRateLimits();
   });
 
   // ========================================================
@@ -955,6 +957,238 @@ describe('Cloudflare Worker Gateway & DTO Sanitizer', () => {
       }), env);
       const getShopData = await getShopRes.json() as any;
       expect(getShopData.items.length).toBe(0);
+    });
+    it('should atomically decrement quantity via delta_consumed and auto-transition to consumed when quantity <= 0', async () => {
+      const initDataA = await generateValidTelegramInitData(userA, TEST_BOT_TOKEN);
+      const getMyRes = await worker.fetch(new Request('https://edge.fridge.tma/api/fridges/my', {
+        headers: { 'Authorization': `tma ${initDataA}` },
+      }), env);
+      const myFridges = await getMyRes.json() as any;
+      const fridgeId = myFridges.fridges[0].id;
+
+      // Add product with quantity 2.5
+      const addRes = await worker.fetch(new Request(`https://edge.fridge.tma/api/fridges/${fridgeId}/products`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `tma ${initDataA}`,
+        },
+        body: JSON.stringify({
+          name: 'Сыр Российский',
+          quantity: 2.5,
+          unit: 'кг',
+          expires_at: '2026-11-20',
+        }),
+      }), env);
+      const addData = await addRes.json() as any;
+      const prodId = addData.product.id;
+
+      // Partial decrement 0.8 -> remaining 1.7
+      const patch1 = await worker.fetch(new Request(`https://edge.fridge.tma/api/fridges/${fridgeId}/products/${prodId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `tma ${initDataA}`,
+        },
+        body: JSON.stringify({ delta_consumed: 0.8 }),
+      }), env);
+      const patch1Data = await patch1.json() as any;
+      expect(patch1Data.product.quantity).toBe(1.7);
+      expect(patch1Data.product.status).toBe('active');
+
+      // Decrement more than remaining (2.0 > 1.7) -> should become 0 and consumed
+      const patch2 = await worker.fetch(new Request(`https://edge.fridge.tma/api/fridges/${fridgeId}/products/${prodId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `tma ${initDataA}`,
+        },
+        body: JSON.stringify({ delta_consumed: 2.0 }),
+      }), env);
+      const patch2Data = await patch2.json() as any;
+      expect(patch2Data.product.quantity).toBe(0);
+      expect(patch2Data.product.status).toBe('consumed');
+    });
+
+    it('should zero out quantity when status is updated to consumed directly without delta_consumed or quantity', async () => {
+      const initDataA = await generateValidTelegramInitData(userA, TEST_BOT_TOKEN);
+      const getMyRes = await worker.fetch(new Request('https://edge.fridge.tma/api/fridges/my', {
+        headers: { 'Authorization': `tma ${initDataA}` },
+      }), env);
+      const myFridges = await getMyRes.json() as any;
+      const fridgeId = myFridges.fridges[0].id;
+
+      // Add product with quantity 5
+      const addRes = await worker.fetch(new Request(`https://edge.fridge.tma/api/fridges/${fridgeId}/products`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `tma ${initDataA}`,
+        },
+        body: JSON.stringify({
+          name: 'Яблоки Голден',
+          quantity: 5,
+          unit: 'кг',
+          expires_at: '2026-11-15',
+        }),
+      }), env);
+      const addData = await addRes.json() as any;
+      const prodId = addData.product.id;
+      expect(addData.product.quantity).toBe(5);
+
+      // Direct status = 'consumed' without delta_consumed or explicit quantity
+      const patchRes = await worker.fetch(new Request(`https://edge.fridge.tma/api/fridges/${fridgeId}/products/${prodId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `tma ${initDataA}`,
+        },
+        body: JSON.stringify({ status: 'consumed' }),
+      }), env);
+      const patchData = await patchRes.json() as any;
+      expect(patchData.product.status).toBe('consumed');
+      expect(patchData.product.quantity).toBe(0);
+    });
+
+    it('should support client-provided product_id and return all ProductItem fields during shopping transfer', async () => {
+      const initDataA = await generateValidTelegramInitData(userA, TEST_BOT_TOKEN);
+      const getMyRes = await worker.fetch(new Request('https://edge.fridge.tma/api/fridges/my', {
+        headers: { 'Authorization': `tma ${initDataA}` },
+      }), env);
+      const myFridges = await getMyRes.json() as any;
+      const fridgeId = myFridges.fridges[0].id;
+
+      // 1. Add shopping item
+      const addRes = await worker.fetch(new Request(`https://edge.fridge.tma/api/fridges/${fridgeId}/shopping`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `tma ${initDataA}`,
+        },
+        body: JSON.stringify({
+          name: 'Бананы Эквадор',
+          quantity: 2,
+          unit: 'кг',
+          shelf_life_days: 5,
+        }),
+      }), env);
+      const addData = await addRes.json() as any;
+      const itemId = addData.item.id;
+
+      // 2. Mark item checked
+      await worker.fetch(new Request(`https://edge.fridge.tma/api/fridges/${fridgeId}/shopping/${itemId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `tma ${initDataA}`,
+        },
+        body: JSON.stringify({ is_checked: 1 }),
+      }), env);
+
+      // 3. Transfer with explicit client product_id
+      const customProdId = 'prod-client-custom-42';
+      const transferRes = await worker.fetch(new Request(`https://edge.fridge.tma/api/fridges/${fridgeId}/shopping/transfer`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `tma ${initDataA}`,
+        },
+        body: JSON.stringify({
+          items: [{ id: itemId, product_id: customProdId }],
+        }),
+      }), env);
+      expect(transferRes.status).toBe(200);
+      const transferData = await transferRes.json() as any;
+      expect(transferData.success).toBe(true);
+      expect(transferData.count).toBe(1);
+
+      const transferred = transferData.products[0];
+      expect(transferred.id).toBe(customProdId);
+      expect(transferred.name).toBe('Бананы Эквадор');
+      expect(transferred.quantity).toBe(2);
+      expect(transferred.status).toBe('active');
+      expect(transferred.barcode).toBeNull();
+      expect(transferred.opened_at).toBeNull();
+      expect(transferred.after_opening_hours).toBeNull();
+      expect(transferred.deleted_at).toBeNull();
+      expect(transferred.notify_before_days).toBe(2);
+    });
+
+    it('should validate quantity > 0 and finite on shopping item create and patch', async () => {
+      const initDataA = await generateValidTelegramInitData(userA, TEST_BOT_TOKEN);
+      const getMyRes = await worker.fetch(new Request('https://edge.fridge.tma/api/fridges/my', {
+        headers: { 'Authorization': `tma ${initDataA}` },
+      }), env);
+      const myFridges = await getMyRes.json() as any;
+      const fridgeId = myFridges.fridges[0].id;
+
+      // Reject quantity 0
+      const resZero = await worker.fetch(new Request(`https://edge.fridge.tma/api/fridges/${fridgeId}/shopping`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `tma ${initDataA}`,
+        },
+        body: JSON.stringify({ name: 'Хлеб', quantity: 0 }),
+      }), env);
+      expect(resZero.status).toBe(400);
+
+      // Reject negative quantity
+      const resNeg = await worker.fetch(new Request(`https://edge.fridge.tma/api/fridges/${fridgeId}/shopping`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `tma ${initDataA}`,
+        },
+        body: JSON.stringify({ name: 'Хлеб', quantity: -3 }),
+      }), env);
+      expect(resNeg.status).toBe(400);
+
+      // Reject non-finite quantity
+      const resNaN = await worker.fetch(new Request(`https://edge.fridge.tma/api/fridges/${fridgeId}/shopping`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `tma ${initDataA}`,
+        },
+        body: JSON.stringify({ name: 'Хлеб', quantity: 'not-a-number' }),
+      }), env);
+      expect(resNaN.status).toBe(400);
+
+      // Valid quantity create
+      const validRes = await worker.fetch(new Request(`https://edge.fridge.tma/api/fridges/${fridgeId}/shopping`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `tma ${initDataA}`,
+        },
+        body: JSON.stringify({ name: 'Хлеб Бородинский', quantity: 2 }),
+      }), env);
+      expect(validRes.status).toBe(201);
+      const validData = await validRes.json() as any;
+      const itemId = validData.item.id;
+
+      // Patch with invalid quantity <= 0
+      const patchZero = await worker.fetch(new Request(`https://edge.fridge.tma/api/fridges/${fridgeId}/shopping/${itemId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `tma ${initDataA}`,
+        },
+        body: JSON.stringify({ quantity: 0 }),
+      }), env);
+      expect(patchZero.status).toBe(400);
+    });
+
+    it('should return simplified public health response with v1.2.1', async () => {
+      const res = await worker.fetch(new Request('https://edge.fridge.tma/api/health'), env);
+      expect(res.status).toBe(200);
+      const data = await res.json() as any;
+      expect(data).toEqual({
+        ok: true,
+        status: 'healthy',
+        version: '1.2.1',
+      });
     });
   });
 });

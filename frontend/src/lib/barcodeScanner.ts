@@ -1,5 +1,3 @@
-import { triggerHapticNotification } from './haptics';
-
 export interface ScannedProductDraft {
   barcode: string;
   name: string;
@@ -31,83 +29,9 @@ const CATEGORY_SHELF_LIFE_FALLBACKS: Array<{
   { pattern: /flour|pasta|grocer|круп|мука|макарон|рис|гречк|консерв/i, categoryName: 'Бакалея и консервы', storageType: 'pantry', days: 180, defaultUnit: 'уп' },
 ];
 
-export function openTelegramBarcodeScanner(): Promise<string | null> {
-  return new Promise((resolve) => {
-    const tg = (window as any).Telegram?.WebApp;
-    if (!tg?.showScanQrPopup) {
-      resolve(null);
-      return;
-    }
-
-    let isDone = false;
-    const finish = (result: string | null) => {
-      if (isDone) return;
-      isDone = true;
-      try {
-        tg.offEvent?.('scanQrPopupClosed', handleClosed);
-      } catch (e) {
-        void e;
-      }
-      resolve(result);
-    };
-
-    const handleClosed = () => {
-      finish(null);
-    };
-
-    try {
-      tg.onEvent?.('scanQrPopupClosed', handleClosed);
-    } catch (e) {
-      void e;
-    }
-
-    try {
-      tg.showScanQrPopup(
-        { text: 'Наведите камеру на штрихкод или QR-код товара' },
-        (scannedText: string) => {
-          const raw = scannedText?.trim();
-          if (!raw) return false;
-
-          // 1. Direct standard digits: EAN-13, EAN-8, UPC (8-14 digits)
-          const digitsMatch = raw.match(/\b\d{8,14}\b/);
-          let extractedBarcode = '';
-
-          if (digitsMatch) {
-            extractedBarcode = digitsMatch[0];
-          } else if (/^01\d{14}/.test(raw)) {
-            // 2. Russian "Честный Знак" / GS1 DataMatrix (dairy, water, pharmacy)
-            // Starts with 01 + 14-digit GTIN. EAN-13 is usually digits 3-15 or GTIN without leading 0
-            const gtin = raw.slice(2, 16);
-            extractedBarcode = gtin.startsWith('0') ? gtin.slice(1) : gtin;
-          } else if (raw.length >= 4 && raw.length <= 64) {
-            // 3. Any other alphanumeric barcode / QR code
-            extractedBarcode = raw;
-          }
-
-          if (extractedBarcode) {
-            try {
-              tg.closeScanQrPopup?.();
-            } catch (e) {
-              void e;
-            }
-            triggerHapticNotification('success');
-            finish(extractedBarcode);
-            return true;
-          }
-
-          return false;
-        }
-      );
-    } catch (e) {
-      console.warn('showScanQrPopup error:', e);
-      finish(null);
-    }
-  });
-}
-
 export async function resolveProductByBarcode(
   barcode: string,
-  localPresets: Array<{ name: string; category?: string; storage_type: 'fridge' | 'freezer' | 'pantry'; shelf_life_days: number; unit?: any }>
+  localPresets: Array<{ name: string; category?: string; storage_type: 'fridge' | 'freezer' | 'pantry'; shelf_life_days: number; unit?: string }>
 ): Promise<ScannedProductDraft> {
   // 1. Проверяем локальный кэш ранее отсканированных товаров семьи
   try {
@@ -155,7 +79,7 @@ export async function resolveProductByBarcode(
       name: productName || matchedPreset.name,
       category: matchedPreset.category || 'Разное',
       storageType: matchedPreset.storage_type,
-      unit: (matchedPreset.unit === 'l' ? 'л' : matchedPreset.unit === 'kg' ? 'кг' : matchedPreset.unit === 'g' ? 'г' : matchedPreset.unit === 'pack' ? 'уп' : 'шт') as any,
+      unit: (matchedPreset.unit === 'l' ? 'л' : matchedPreset.unit === 'kg' ? 'кг' : matchedPreset.unit === 'g' ? 'г' : matchedPreset.unit === 'pack' ? 'уп' : 'шт') as ScannedProductDraft['unit'],
       quantity: 1,
       estimatedShelfLifeDays: matchedPreset.shelf_life_days,
       isApproximateDate: true,

@@ -9,7 +9,9 @@
   "scripts": {
     "test": "vitest run",
     "lint": "npm run lint --workspace=frontend",
-    "build": "npm run build --workspace=frontend"
+    "build": "npm run build --workspace=frontend",
+    "typecheck:worker": "tsc --project worker/tsconfig.json --noEmit",
+    "typecheck": "npm run --prefix frontend typecheck && npm run typecheck:worker"
   },
   "devDependencies": {
     "playwright": "^1.64.1",

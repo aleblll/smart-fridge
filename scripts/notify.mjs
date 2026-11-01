@@ -1,10 +1,17 @@
 #!/usr/bin/env node
 
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+
 /**
  * Smart Fridge Telegram Mini App - Daily Morning Notifier
  * Runs daily via GitHub Actions Scheduled Cron (06:00 UTC = 09:00 MSK).
  * Implements TASK-005, ADR-003 and rate limiting up to 25 msgs/sec with 429 retry handling.
  */
+
+// In-memory cache for idempotency during programmatic/test invocations
+export const sentDigestsCache = new Set();
 
 // Simple HTML escaping helper for user-provided data
 export function escapeHtml(str) {
@@ -296,7 +303,7 @@ export async function sendAllNotifications({
   if (!fridges) {
     if (!workerUrl) {
       console.warn('⚠️ [Morning Notifier] CLOUDFLARE_WORKER_URL не настроен. Пропуск утреннего сканирования до развертывания D1 Worker.');
-      return { total: 0, sent: 0, blocked: 0, failed: 0 };
+      return { total: 0, sent: 0, blocked: 0, failed: 0, skipped: 0 };
     }
 
     const endpoint = `${workerUrl.replace(/\/$/, '')}/api/cron/notify`;
@@ -326,7 +333,26 @@ export async function sendAllNotifications({
 
   if (userDigests.length === 0) {
     console.log('✨ [Morning Notifier] No expiring products found today. Sequence finished.');
-    return { total: 0, sent: 0, blocked: 0, failed: 0 };
+    return { total: 0, sent: 0, blocked: 0, failed: 0, skipped: 0 };
+  }
+
+  const todayStr = (referenceDate instanceof Date ? referenceDate : new Date(referenceDate)).toISOString().slice(0, 10);
+
+  // Filter out users already notified today to prevent duplicate notifications
+  const pendingDigests = userDigests.filter(digest => {
+    const key = `${digest.userId}:${todayStr}`;
+    if (sentDigestsCache.has(key)) {
+      console.log(`⏩ [Morning Notifier] Skipping user ${digest.userId}: already notified today (${todayStr}).`);
+      return false;
+    }
+    return true;
+  });
+
+  const skippedCount = userDigests.length - pendingDigests.length;
+
+  if (pendingDigests.length === 0) {
+    console.log(`✨ [Morning Notifier] All users already notified today (${todayStr}). Skipping duplicate run.`);
+    return { total: userDigests.length, sent: 0, blocked: 0, failed: 0, skipped: skippedCount };
   }
 
   const rateLimiter = new RateLimiter(25);
@@ -334,7 +360,8 @@ export async function sendAllNotifications({
   let blockedCount = 0;
   let failedCount = 0;
 
-  for (const digest of userDigests) {
+  for (const digest of pendingDigests) {
+    const idempotencyKey = `${digest.userId}:${todayStr}`;
     await rateLimiter.throttle(sleepFn);
 
     const { html, replyMarkup } = formatDigestHtml(digest, appUrl);
@@ -349,8 +376,10 @@ export async function sendAllNotifications({
 
     if (result.success) {
       sentCount++;
+      sentDigestsCache.add(idempotencyKey);
     } else if (result.blocked) {
       blockedCount++;
+      sentDigestsCache.add(idempotencyKey);
     } else {
       failedCount++;
     }
@@ -361,12 +390,14 @@ export async function sendAllNotifications({
   console.log(`   - Sent Successfully: ${sentCount}`);
   console.log(`   - Blocked Users: ${blockedCount}`);
   console.log(`   - Failed: ${failedCount}`);
+  console.log(`   - Skipped (Already Notified): ${skippedCount}`);
 
   return {
     total: userDigests.length,
     sent: sentCount,
     blocked: blockedCount,
-    failed: failedCount
+    failed: failedCount,
+    skipped: skippedCount
   };
 }
 
@@ -382,6 +413,14 @@ if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith
     process.exit(0);
   }
 
+  // Prevent duplicate execution on the same day in GitHub Actions / CLI
+  const todayDateStr = new Date().toISOString().slice(0, 10);
+  const lockFilePath = path.join(os.tmpdir(), `smart_fridge_notify_${todayDateStr}.lock`);
+  if (fs.existsSync(lockFilePath)) {
+    console.log(`✨ [Morning Notifier] Notifications were already processed today (${todayDateStr}). Skipping duplicate run.`);
+    process.exit(0);
+  }
+
   sendAllNotifications({
     workerUrl,
     cronSecret,
@@ -389,6 +428,9 @@ if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith
     appUrl
   })
     .then((stats) => {
+      try {
+        fs.writeFileSync(lockFilePath, new Date().toISOString(), 'utf-8');
+      } catch {}
       console.log('✅ Daily notification run completed successfully');
       process.exit(0);
     })

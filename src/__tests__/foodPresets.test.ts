@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import foodPresets from '../data/foodPresets.json';
+import presetsData from '../../frontend/src/data/foodPresets.json';
+const foodPresets = presetsData;
 
 describe('SanPiN & USDA Food Presets Dataset Validation', () => {
   const allowedCategories = [

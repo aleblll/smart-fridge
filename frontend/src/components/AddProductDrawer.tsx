@@ -321,18 +321,24 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
 
                 {/* Preset Chips (Search Autocomplete) */}
                 {name.trim() && filteredPresets.length > 0 && (
-                  <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1">
+                  <div
+                    className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1 pr-4"
+                    style={{
+                      maskImage: 'linear-gradient(to right, black 85%, transparent 100%)',
+                      WebkitMaskImage: 'linear-gradient(to right, black 85%, transparent 100%)',
+                    }}
+                  >
                     {filteredPresets.map((preset) => (
                       <button
                         key={preset.id}
                         type="button"
                         onClick={() => handleSelectPreset(preset)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#2A3834] border border-white/[0.06] text-xs text-[#F1F5F4] hover:border-[#5E8B7E] hover:text-[#5E8B7E] active:scale-95 transition-all whitespace-nowrap"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#2A3834] border border-white/[0.06] text-xs text-[#F1F5F4] hover:border-[#5E8B7E] hover:text-[#5E8B7E] active:scale-95 transition-all whitespace-nowrap shrink-0 flex-none"
                       >
                         <Sparkles className="w-3 h-3 text-[#A7C7E7]" />
                         <span className="font-medium truncate max-w-[130px]">{preset.name}</span>
                         <span className="text-[10px] text-[#8FA39D] font-mono shrink-0 flex-shrink-0">
-                          +{preset.shelf_life_days.fridge ?? preset.shelf_life_days.pantry ?? 3}д
+                          +{preset.shelf_life_days[storageType] ?? preset.shelf_life_days.fridge ?? 3}д
                         </span>
                       </button>
                     ))}
@@ -346,7 +352,13 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
                       <Sparkles className="w-3 h-3 text-[#A7C7E7]" />
                       <span>Частые покупки семьи:</span>
                     </div>
-                    <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1">
+                    <div
+                      className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1 pr-4"
+                      style={{
+                        maskImage: 'linear-gradient(to right, black 85%, transparent 100%)',
+                        WebkitMaskImage: 'linear-gradient(to right, black 85%, transparent 100%)',
+                      }}
+                    >
                       {familyPresets.map((preset) => (
                         <button
                           key={preset.canonical_name + preset.storage_type}
@@ -356,10 +368,10 @@ export const AddProductDrawer: React.FC<AddProductDrawerProps> = ({
                             setName(preset.display_name);
                             setCategory(preset.category || 'Другое');
                             setStorageType(preset.storage_type);
-                            setUnit((preset.unit as any) || 'pcs');
+                            setUnit((preset.unit as UnitType) || 'pcs');
                             setDays(preset.shelf_life_days || 7);
                           }}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#2A3834] border border-[#5E8B7E]/30 text-xs text-[#F1F5F4] hover:border-[#5E8B7E] hover:text-[#5E8B7E] active:scale-95 transition-all whitespace-nowrap"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#2A3834] border border-[#5E8B7E]/30 text-xs text-[#F1F5F4] hover:border-[#5E8B7E] hover:text-[#5E8B7E] active:scale-95 transition-all whitespace-nowrap shrink-0 flex-none"
                         >
                           <Sparkles className="w-3 h-3 text-[#5E8B7E]" />
                           <span className="font-medium truncate max-w-[130px]">{preset.display_name}</span>

@@ -66,11 +66,11 @@ describe('Worker Morning Notifier & Cron Trigger (TASK-005 & Phase 4)', () => {
 
       expect(html).toContain('<b>🌿 Свежесть: вечерний дайджест (18:30)</b>');
       expect(html).toContain('🔴 <b>Истекает сегодня / просрочено:</b>');
-      expect(html).toContain('• <b>Молоко &lt;3.2%&gt;</b> — 1 l (сегодня)');
+      expect(html).toContain('• <b>Молоко &lt;3.2%&gt;</b> — 1 л (сегодня)');
       expect(html).toContain('🟡 <b>Истекает завтра:</b>');
-      expect(html).toContain('• <b>Сыр</b> — 200 g');
+      expect(html).toContain('• <b>Сыр</b> — 200 г');
       expect(html).toContain('🟠 <b>Истекает в ближайшие дни:</b>');
-      expect(html).toContain('• Йогурт (2 pcs) — до 2026-09-25');
+      expect(html).toContain('• Йогурт (2 шт) — до 2026-09-25');
 
       expect(replyMarkup.inline_keyboard[0][0].text).toBe('Открыть Холодильник 🌿');
       expect(replyMarkup.inline_keyboard[0][0].web_app.url).toBe('https://aleblll.github.io/smart-fridge/');

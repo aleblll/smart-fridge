@@ -36,9 +36,9 @@ export function searchPresets(query: string, limit: number = 10): FoodPreset[] {
  */
 export function calculateExpirationDate(preset: FoodPreset, storageType: StorageType = 'fridge'): string {
   const days = preset.shelf_life_days[storageType] ?? preset.shelf_life_days.fridge ?? 3;
-  const targetDate = new Date();
-  targetDate.setDate(targetDate.getDate() + days);
-  return targetDate.toISOString().slice(0, 10);
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 /**

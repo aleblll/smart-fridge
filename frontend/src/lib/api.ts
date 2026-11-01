@@ -18,6 +18,13 @@ const CACHED_INIT_DATA_KEY = 'smart_fridge_cached_init_data';
 export function getTelegramInitData(): string {
   if (typeof window === 'undefined') return '';
 
+  // Security: Narrow replay window and avoid eternal storage in localStorage
+  try {
+    localStorage.removeItem(CACHED_INIT_DATA_KEY);
+  } catch {
+    // ignore storage removal errors
+  }
+
   let found = '';
 
   // 1. Native Telegram.WebApp
@@ -70,23 +77,20 @@ export function getTelegramInitData(): string {
     found = found.replace(/^[#?]/, '').trim();
   }
 
-  // 3. Cache persistence (both sessionStorage and localStorage to survive mobile webview reloads)
+  // 3. Cache persistence (sessionStorage ONLY to narrow replay window)
   if (found && found.includes('hash=')) {
     try {
       sessionStorage.setItem(CACHED_INIT_DATA_KEY, found);
-      localStorage.setItem(CACHED_INIT_DATA_KEY, found);
     } catch {
       // ignore storage write errors
     }
     return found;
   }
 
-  // 4. Fallback to cached value from current session or previous visit
+  // 4. Fallback to cached value from current session
   try {
     const sessionCached = sessionStorage.getItem(CACHED_INIT_DATA_KEY);
     if (sessionCached && sessionCached.includes('hash=')) return sessionCached;
-    const localCached = localStorage.getItem(CACHED_INIT_DATA_KEY);
-    if (localCached && localCached.includes('hash=')) return localCached;
   } catch {
     // ignore storage read errors
   }
@@ -398,12 +402,14 @@ export const api = {
    * POST /api/fridges/:id/shopping/transfer
    */
   async transferShoppingItems(
-    fridgeId: string
+    fridgeId: string,
+    body?: { items?: Array<{ id: string; target_product_id?: string }> }
   ): Promise<ApiResponse<{ count: number; products: ProductItem[] }>> {
     return request<{ count: number; products: ProductItem[] }>(
       `/fridges/${encodeURIComponent(fridgeId)}/shopping/transfer`,
       {
         method: 'POST',
+        body: body ? JSON.stringify(body) : undefined,
       }
     );
   },

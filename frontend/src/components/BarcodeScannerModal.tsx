@@ -1,7 +1,15 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { BrowserMultiFormatReader } from '@zxing/library';
 import { X, Camera, Image, Keyboard, AlertCircle, Loader2, Sparkles } from 'lucide-react';
 import { haptic } from '@/lib/haptics';
+
+interface NativeBarcodeDetector {
+  detect(image: ImageBitmapSource): Promise<Array<{ rawValue?: string }>>;
+}
+
+interface WindowWithBarcodeDetector extends Window {
+  BarcodeDetector?: new (options?: { formats: string[] }) => NativeBarcodeDetector;
+}
 
 interface BarcodeScannerModalProps {
   open: boolean;
@@ -23,6 +31,17 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  const handleClose = () => {
+    haptic.selection();
+    onClose();
+  };
+
+  const handleTabChange = (tab: 'camera' | 'photo' | 'manual') => {
+    haptic.selection();
+    setActiveTab(tab);
+    setCameraError(null);
+  };
+
   // Helper to extract clean barcode / EAN from various formats
   const cleanExtractedCode = (rawText: string): string => {
     const clean = rawText.trim();
@@ -39,16 +58,19 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     return clean;
   };
 
-  const handleSuccess = (code: string) => {
-    const cleaned = cleanExtractedCode(code);
-    haptic.notification('success');
-    // Stop camera before closing
-    if (readerRef.current) {
-      readerRef.current.reset();
-    }
-    onDetected(cleaned);
-    onClose();
-  };
+  const handleSuccess = useCallback(
+    (code: string) => {
+      const cleaned = cleanExtractedCode(code);
+      haptic.notification('success');
+      // Stop camera before closing
+      if (readerRef.current) {
+        readerRef.current.reset();
+      }
+      onDetected(cleaned);
+      onClose();
+    },
+    [onDetected, onClose]
+  );
 
   // Start live camera scanning
   useEffect(() => {
@@ -106,7 +128,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
         readerRef.current.reset();
       }
     };
-  }, [open, activeTab]);
+  }, [open, activeTab, handleSuccess]);
 
   // Handle photo snapshot upload
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -132,9 +154,10 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       }
 
       // If ZXing failed on whole image, try native BarcodeDetector if available
-      if ('BarcodeDetector' in window) {
+      const win = window as unknown as WindowWithBarcodeDetector;
+      if (win.BarcodeDetector) {
         try {
-          const detector = new (window as any).BarcodeDetector({
+          const detector = new win.BarcodeDetector({
             formats: ['ean_13', 'ean_8', 'qr_code', 'upc_a', 'upc_e', 'data_matrix', 'code_128'],
           });
           const bitmap = await createImageBitmap(file);
@@ -175,7 +198,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       role="dialog"
       aria-modal="true"
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fadeIn"
-      onClick={onClose}
+      onClick={handleClose}
     >
       <div
         onClick={(e) => e.stopPropagation()}
@@ -194,7 +217,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleClose}
             className="p-1.5 rounded-full hover:bg-white/[0.08] text-[#8FA39D] hover:text-[#F1F5F4] transition-all"
             aria-label="Закрыть"
           >
@@ -206,7 +229,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
         <div className="grid grid-cols-3 gap-1 p-1 rounded-2xl bg-white/[0.04] border border-white/[0.06] text-xs">
           <button
             type="button"
-            onClick={() => { setActiveTab('camera'); setCameraError(null); }}
+            onClick={() => handleTabChange('camera')}
             className={`py-2 rounded-xl font-medium transition-all flex items-center justify-center gap-1.5 ${
               activeTab === 'camera'
                 ? 'bg-[#5E8B7E] text-[#F1F5F4] shadow-sm'
@@ -218,7 +241,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
           </button>
           <button
             type="button"
-            onClick={() => { setActiveTab('photo'); setCameraError(null); }}
+            onClick={() => handleTabChange('photo')}
             className={`py-2 rounded-xl font-medium transition-all flex items-center justify-center gap-1.5 ${
               activeTab === 'photo'
                 ? 'bg-[#5E8B7E] text-[#F1F5F4] shadow-sm'
@@ -230,7 +253,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
           </button>
           <button
             type="button"
-            onClick={() => { setActiveTab('manual'); setCameraError(null); }}
+            onClick={() => handleTabChange('manual')}
             className={`py-2 rounded-xl font-medium transition-all flex items-center justify-center gap-1.5 ${
               activeTab === 'manual'
                 ? 'bg-[#5E8B7E] text-[#F1F5F4] shadow-sm'

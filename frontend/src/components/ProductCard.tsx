@@ -117,7 +117,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
     }
   };
 
-  const handlePortionSelect = (e: React.MouseEvent, delta: number) => {
+  const handlePortionSelect = (e: React.SyntheticEvent, delta: number) => {
     e.stopPropagation();
     haptic.notification('success');
     setShowPortionSelect(false);
@@ -351,7 +351,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                   if (e.key === 'Enter') {
                     const val = Number(customDelta);
                     if (val > 0 && val <= product.quantity) {
-                      handlePortionSelect(e as any, val);
+                      handlePortionSelect(e, val);
                       setCustomDelta('');
                     }
                   }

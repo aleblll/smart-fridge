@@ -11,10 +11,10 @@ const LEGACY_MIGRATED_FLAG = 'smart_fridge_legacy_migrated_v1';
 
 export interface QueuedMutation {
   id: string;
-  type: 'ADD' | 'UPDATE' | 'DELETE';
+  type: 'ADD' | 'UPDATE' | 'DELETE' | 'SHOPPING_ADD' | 'SHOPPING_UPDATE' | 'SHOPPING_DELETE';
   fridgeId: string;
   productId: string;
-  payload?: Partial<ProductItem>;
+  payload?: Partial<ProductItem> | Partial<ShoppingItem>;
   timestamp: number;
 }
 
@@ -220,9 +220,30 @@ export const storage = {
         // Bi-directional reconciliation: protect locally entered items that haven't reached D1 yet
         const localProducts = this.getInitialProducts(fridgeId) || [];
         const serverIds = new Set(serverProducts.map((p) => p.id));
-        const unsyncedLocals = localProducts.filter(
-          (p) => p.status === 'active' && !serverIds.has(p.id) && !p.id.startsWith('demo-')
-        );
+        const unsyncedLocals = localProducts.filter((p) => {
+          if (p.status !== 'active' || serverIds.has(p.id) || p.id.startsWith('demo-')) {
+            return false;
+          }
+
+          // Filter out duplicates: don't consider product "new" if server already has
+          // an active product with the same canonical_name, storage_type, quantity and creation time within 60s
+          const pCanonical = (p.canonical_name || p.name).trim().toLowerCase();
+          const pTime = p.created_at ? new Date(p.created_at).getTime() : 0;
+          const isDuplicateOnServer = serverProducts.some((sp) => {
+            if (sp.status !== 'active') return false;
+            const spCanonical = (sp.canonical_name || sp.name).trim().toLowerCase();
+            if (spCanonical !== pCanonical) return false;
+            if (sp.storage_type !== p.storage_type) return false;
+            if (Number(sp.quantity) !== Number(p.quantity)) return false;
+            const spTime = sp.created_at ? new Date(sp.created_at).getTime() : 0;
+            if (pTime > 0 && spTime > 0 && Math.abs(pTime - spTime) <= 60000) {
+              return true;
+            }
+            return false;
+          });
+
+          return !isDuplicateOnServer;
+        });
 
         if (unsyncedLocals.length > 0) {
           logger.info('SYNC', `Reconciling ${unsyncedLocals.length} local products not present on D1 server to cloud...`);
@@ -372,9 +393,6 @@ export const storage = {
   /**
    * Update product with optimistic local cache update + D1 API sync + offline queue
    */
-  /**
-   * Update product with optimistic local cache update + D1 API sync + offline queue
-   */
   async updateProduct(
     fridgeId: string,
     productId: string,
@@ -394,14 +412,15 @@ export const storage = {
             newQty = 0;
           }
         }
-        updatedProduct = {
+        const cleanProduct: ProductItem = {
           ...p,
           ...updates,
           quantity: newQty,
           status: newStatus,
           updated_at: new Date().toISOString(),
         };
-        delete (updatedProduct as any).delta_consumed;
+        delete (cleanProduct as ProductItem & { delta_consumed?: number }).delta_consumed;
+        updatedProduct = cleanProduct;
         return updatedProduct;
       }
       return p;
@@ -412,8 +431,10 @@ export const storage = {
     }
 
     // 2. Send API request
+    const { delta_consumed: _, ...apiUpdates } = updates;
+    void _;
     try {
-      const res = await api.updateProduct(fridgeId, productId, updates as any);
+      const res = await api.updateProduct(fridgeId, productId, apiUpdates);
       if (res.success && res.data?.product) {
         logger.sync(`Product updated in D1: ${productId}`);
         return res.data.product;
@@ -523,11 +544,17 @@ export const storage = {
       try {
         let res: { success: boolean; code?: string; error?: string };
         if (item.type === 'ADD') {
-          res = await api.addProduct(item.fridgeId, item.payload || {});
+          res = await api.addProduct(item.fridgeId, (item.payload as Partial<ProductItem>) || {});
         } else if (item.type === 'UPDATE') {
-          res = await api.updateProduct(item.fridgeId, item.productId, item.payload || {});
+          res = await api.updateProduct(item.fridgeId, item.productId, (item.payload as Partial<ProductItem>) || {});
         } else if (item.type === 'DELETE') {
           res = await api.deleteProduct(item.fridgeId, item.productId);
+        } else if (item.type === 'SHOPPING_ADD') {
+          res = await api.addShoppingItem(item.fridgeId, (item.payload as Partial<ShoppingItem>) || {});
+        } else if (item.type === 'SHOPPING_UPDATE') {
+          res = await api.updateShoppingItem(item.fridgeId, item.productId, (item.payload as Partial<ShoppingItem>) || {});
+        } else if (item.type === 'SHOPPING_DELETE') {
+          res = await api.deleteShoppingItem(item.fridgeId, item.productId);
         } else {
           continue;
         }
@@ -543,6 +570,13 @@ export const storage = {
         } else {
           // Client or 4xx error (e.g. not found), discard mutation to avoid stuck queue
           logger.warn('STORAGE', `Discarding failing mutation [${item.type}] ${item.productId}: ${res.error}`);
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(
+              new CustomEvent('smart_fridge_toast', {
+                detail: { message: `Ошибка синхронизации: ${res.error || 'не удалось применить'}` },
+              })
+            );
+          }
         }
       } catch {
         remainingQueue.push(item);
@@ -595,10 +629,44 @@ export const storage = {
   async fetchAndSyncShoppingItems(fridgeId: string): Promise<ShoppingItem[] | null> {
     if (!fridgeId) return null;
     try {
+      await this.processMutationQueue();
+    } catch (e) {
+      logger.warn('STORAGE', `Offline queue processing error before shopping sync: ${e}`);
+    }
+
+    try {
       const res = await api.getShoppingItems(fridgeId);
       if (res.success && res.data?.items) {
-        this.saveShoppingItemsLocally(fridgeId, res.data.items);
-        return res.data.items;
+        const serverItems = res.data.items;
+        const localItems = this.getCachedShoppingItems(fridgeId);
+        const queue = this.getMutationQueue().filter((m) => m.fridgeId === fridgeId);
+
+        const pendingDeletedIds = new Set(
+          queue.filter((m) => m.type === 'SHOPPING_DELETE').map((m) => m.productId)
+        );
+        const pendingUpdatesMap = new Map(
+          queue
+            .filter((m) => m.type === 'SHOPPING_UPDATE' && m.payload)
+            .map((m) => [m.productId, m.payload as Partial<ShoppingItem>])
+        );
+
+        // Apply pending updates and exclusions to server items
+        const mergedServerItems: ShoppingItem[] = serverItems
+          .filter((item) => !pendingDeletedIds.has(item.id))
+          .map((item) => {
+            const pendingUpdate = pendingUpdatesMap.get(item.id);
+            return pendingUpdate ? { ...item, ...pendingUpdate } : item;
+          });
+
+        // Retain unsynced local items (e.g. items added offline not yet on server)
+        const serverIds = new Set(serverItems.map((s) => s.id));
+        const unsyncedLocals = localItems.filter(
+          (item) => !serverIds.has(item.id) && !pendingDeletedIds.has(item.id)
+        );
+
+        const reconciled = [...unsyncedLocals, ...mergedServerItems];
+        this.saveShoppingItemsLocally(fridgeId, reconciled);
+        return reconciled;
       }
       return null;
     } catch (err) {
@@ -639,7 +707,29 @@ export const storage = {
     const updated = [fullItem, ...current.filter((i) => i.id !== id)];
     this.saveShoppingItemsLocally(fridgeId, updated);
 
-    api.addShoppingItem(fridgeId, fullItem).catch(() => {});
+    try {
+      const res = await api.addShoppingItem(fridgeId, fullItem);
+      if (!res.success) {
+        this.enqueueMutation({
+          id: `mut-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          type: 'SHOPPING_ADD',
+          fridgeId,
+          productId: id,
+          payload: fullItem,
+          timestamp: Date.now(),
+        });
+      }
+    } catch {
+      this.enqueueMutation({
+        id: `mut-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        type: 'SHOPPING_ADD',
+        fridgeId,
+        productId: id,
+        payload: fullItem,
+        timestamp: Date.now(),
+      });
+    }
+
     return fullItem;
   },
 
@@ -654,7 +744,30 @@ export const storage = {
       return i;
     });
     this.saveShoppingItemsLocally(fridgeId, updated);
-    api.updateShoppingItem(fridgeId, itemId, { is_checked: isChecked ? 1 : 0 }).catch(() => {});
+
+    try {
+      const res = await api.updateShoppingItem(fridgeId, itemId, { is_checked: isChecked ? 1 : 0 });
+      if (!res.success) {
+        this.enqueueMutation({
+          id: `mut-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          type: 'SHOPPING_UPDATE',
+          fridgeId,
+          productId: itemId,
+          payload: { is_checked: isChecked ? 1 : 0 },
+          timestamp: Date.now(),
+        });
+      }
+    } catch {
+      this.enqueueMutation({
+        id: `mut-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        type: 'SHOPPING_UPDATE',
+        fridgeId,
+        productId: itemId,
+        payload: { is_checked: isChecked ? 1 : 0 },
+        timestamp: Date.now(),
+      });
+    }
+
     return target;
   },
 
@@ -662,20 +775,44 @@ export const storage = {
     const current = this.getCachedShoppingItems(fridgeId);
     const updated = current.filter((i) => i.id !== itemId);
     this.saveShoppingItemsLocally(fridgeId, updated);
-    api.deleteShoppingItem(fridgeId, itemId).catch(() => {});
+
+    try {
+      const res = await api.deleteShoppingItem(fridgeId, itemId);
+      if (!res.success) {
+        this.enqueueMutation({
+          id: `mut-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          type: 'SHOPPING_DELETE',
+          fridgeId,
+          productId: itemId,
+          timestamp: Date.now(),
+        });
+      }
+    } catch {
+      this.enqueueMutation({
+        id: `mut-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        type: 'SHOPPING_DELETE',
+        fridgeId,
+        productId: itemId,
+        timestamp: Date.now(),
+      });
+    }
   },
 
-  async transferShoppingItems(fridgeId: string): Promise<ProductItem[]> {
+  async transferShoppingItems(
+    fridgeId: string,
+    onServerUpdated?: (products: ProductItem[]) => void
+  ): Promise<ProductItem[]> {
     const currentShopping = this.getCachedShoppingItems(fridgeId);
     const checked = currentShopping.filter((i) => i.is_checked === 1);
     const remaining = currentShopping.filter((i) => i.is_checked === 0);
     this.saveShoppingItemsLocally(fridgeId, remaining);
 
     const now = new Date();
-    const newProducts: ProductItem[] = checked.map((item) => {
+    const itemsWithTargets = checked.map((item) => {
+      const targetId = `prod-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       const expDate = new Date(now.getTime() + (item.shelf_life_days || 7) * 86400000);
-      return {
-        id: `prod-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      const product: ProductItem = {
+        id: targetId,
         fridge_id: fridgeId,
         name: item.name,
         canonical_name: item.canonical_name || item.name.toLowerCase(),
@@ -692,16 +829,39 @@ export const storage = {
         created_at: now.toISOString(),
         updated_at: now.toISOString(),
       };
+      return { item, targetId, product };
     });
 
+    const newProducts = itemsWithTargets.map((t) => t.product);
     const currentProds = this.getInitialProducts(fridgeId) || [];
     this.saveProductsLocally(fridgeId, [...newProducts, ...currentProds]);
 
-    api.transferShoppingItems(fridgeId).then((res) => {
-      if (res.success && res.data?.products) {
-        this.loadProducts(fridgeId);
-      }
-    }).catch(() => {});
+    const transferPayload = {
+      items: itemsWithTargets.map((t) => ({
+        id: t.item.id,
+        target_product_id: t.targetId,
+      })),
+    };
+
+    api
+      .transferShoppingItems(fridgeId, transferPayload)
+      .then((res) => {
+        if (res.success && res.data?.products) {
+          const serverProducts = res.data.products;
+          // Replace temporary local records with received server products
+          const currentInStorage = this.getInitialProducts(fridgeId) || [];
+          const tempIds = new Set(newProducts.map((p) => p.id));
+          const filteredCurrent = currentInStorage.filter((p) => !tempIds.has(p.id));
+          const merged = [...serverProducts, ...filteredCurrent];
+          this.saveProductsLocally(fridgeId, merged);
+          if (onServerUpdated) {
+            onServerUpdated(merged);
+          }
+        }
+      })
+      .catch((err) => {
+        logger.warn('STORAGE', `transferShoppingItems remote error: ${err}`);
+      });
 
     return newProducts;
   },

@@ -83,6 +83,7 @@ CREATE TABLE IF NOT EXISTS fridge_presets (
   FOREIGN KEY (fridge_id) REFERENCES fridges(id) ON DELETE CASCADE
 );
 
+-- Индексы пресетов: ускоряют автодополнение и распознавание штрихкодов
 CREATE INDEX IF NOT EXISTS idx_fridge_presets_top ON fridge_presets (fridge_id, usage_count DESC, last_used_at DESC);
 CREATE INDEX IF NOT EXISTS idx_fridge_presets_barcode ON fridge_presets (fridge_id, barcode) WHERE barcode IS NOT NULL;
 
@@ -93,7 +94,7 @@ CREATE TABLE IF NOT EXISTS shopping_items (
   name TEXT NOT NULL,
   canonical_name TEXT NOT NULL COLLATE NOCASE,
   storage_type TEXT NOT NULL DEFAULT 'fridge',
-  quantity REAL NOT NULL DEFAULT 1,
+  quantity REAL NOT NULL DEFAULT 1 CHECK (quantity > 0),
   unit TEXT NOT NULL DEFAULT 'шт',
   shelf_life_days INTEGER NOT NULL DEFAULT 7,
   is_checked INTEGER NOT NULL DEFAULT 0 CHECK (is_checked IN (0, 1)),

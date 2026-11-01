@@ -3,15 +3,13 @@ import { TelegramProvider } from '@/context/TelegramContext';
 import { useTelegramWebApp } from '@/hooks/useTelegramWebApp';
 import { AddProductDrawer } from '@/components/AddProductDrawer';
 import { ProductCard } from '@/components/ProductCard';
-// Recipe feature hidden per user request:
-// import { EveningIdeaCard, type RecipeIdea } from '@/components/EveningIdeaCard';
-// import { CookRecipeModal } from '@/components/CookRecipeModal';
 import { ShareModal } from '@/components/ShareModal';
 import { DiagnosticsDrawer } from '@/components/DiagnosticsDrawer';
 import { ShoppingListTab } from '@/components/ShoppingListTab';
 import { storage } from '@/lib/storage';
 import { api } from '@/lib/api';
 import { logger } from '@/lib/logger';
+import { formatUnitRu } from '@/lib/haptics';
 import { calculateFreshnessMetrics, autoDiscardExpiredProducts } from '@/lib/freshness';
 import type { ProductItem, StorageType, ProductStatus, FridgeSummary, ShoppingItem } from '@/types';
 import {
@@ -97,9 +95,6 @@ function MainScreen() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [diagOpen, setDiagOpen] = useState(false);
-  // Recipe states hidden per user request:
-  // const [cookingRecipe, setCookingRecipe] = useState<RecipeIdea | null>(null);
-  // const [cookModalOpen, setCookModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'inventory' | 'shopping' | 'consumed' | 'discarded'>('inventory');
   const [activeZone, setActiveZone] = useState<StorageType | 'all'>('all');
   const [selectedCategory, setSelectedCategory] = useState<string>('Все');
@@ -136,6 +131,20 @@ function MainScreen() {
     }, actionLabel ? 5000 : 3500);
   }, []);
 
+  // Listen for background sync / storage toast notifications
+  useEffect(() => {
+    const handleToastEvent = (e: Event) => {
+      const customEvent = e as CustomEvent<{ message?: string }>;
+      if (customEvent.detail?.message) {
+        showToast(customEvent.detail.message);
+      }
+    };
+    window.addEventListener('smart_fridge_toast', handleToastEvent);
+    return () => {
+      window.removeEventListener('smart_fridge_toast', handleToastEvent);
+    };
+  }, [showToast]);
+
   const [isSendingTestNotify, setIsSendingTestNotify] = useState(false);
 
   const handleTestNotification = async () => {
@@ -159,7 +168,7 @@ function MainScreen() {
     }
   };
 
-  // Helper to safely set products and automatically discard expired items
+  // Helper to safely set products and automatically discard expired products
   const applyProductsWithAutoDiscard = useCallback(
     (rawProducts: ProductItem[], targetFridgeId?: string | null): ProductItem[] => {
       const { updated, discardedCount } = autoDiscardExpiredProducts(rawProducts);
@@ -434,16 +443,25 @@ function MainScreen() {
     refreshProducts();
   }, [activeFridgeId, refreshProducts, applyProductsWithAutoDiscard]);
 
-  // Auto-refresh when app window regains focus or comes into foreground
+  // Auto-refresh when app window regains focus or comes into foreground (with 30s throttling)
+  const lastFocusRefreshRef = useRef<number>(Date.now());
   useEffect(() => {
     const handleFocus = () => {
-      refreshProducts();
+      const now = Date.now();
+      if (now - lastFocusRefreshRef.current >= 30_000) {
+        lastFocusRefreshRef.current = now;
+        refreshProducts();
+      }
     };
 
     window.addEventListener('focus', handleFocus);
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
-        refreshProducts();
+        const now = Date.now();
+        if (now - lastFocusRefreshRef.current >= 30_000) {
+          lastFocusRefreshRef.current = now;
+          refreshProducts();
+        }
       }
     };
     document.addEventListener('visibilitychange', handleVisibility);
@@ -536,7 +554,7 @@ function MainScreen() {
         await storage.updateProduct(targetFridgeId, id, { delta_consumed: delta });
       }
       haptic.notification('success');
-      showToast(`Списано: ${delta} ${product.unit}`);
+      showToast(`Списано: ${delta} ${formatUnitRu(product.unit)}`);
     } else {
       // Full consumption:
       setProducts((prev) =>
@@ -615,7 +633,9 @@ function MainScreen() {
     const targetFridgeId = await ensureActiveFridge();
     if (!targetFridgeId) return;
     haptic.notification('success');
-    const addedProducts = await storage.transferShoppingItems(targetFridgeId);
+    const addedProducts = await storage.transferShoppingItems(targetFridgeId, (serverProducts) => {
+      setProducts(serverProducts);
+    });
     const remainingShopping = storage.getCachedShoppingItems(targetFridgeId);
     setShoppingItems(remainingShopping);
     setProducts((prev) => [...addedProducts, ...prev]);
@@ -640,32 +660,6 @@ function MainScreen() {
     }
     logger.info('INVENTORY', `Item ${id} package opened, new expiry: ${updates.expires_at}`);
   };
-
-  /* Recipe cooking logic hidden per user request:
-  const handleCookRecipe = (recipe: RecipeIdea) => {
-    setCookingRecipe(recipe);
-    setCookModalOpen(true);
-  };
-
-  const handleConsumeRecipeIngredients = async (productIds: string[]) => {
-    setProducts((prev) =>
-      prev.map((p) =>
-        productIds.includes(p.id)
-          ? { ...p, status: 'consumed' as ProductStatus, updated_at: new Date().toISOString() }
-          : p
-      )
-    );
-    setCookModalOpen(false);
-
-    const targetFridgeId = await ensureActiveFridge();
-    if (targetFridgeId) {
-      for (const pid of productIds) {
-        storage.updateProduct(targetFridgeId, pid, { status: 'consumed' }).catch(() => {});
-      }
-    }
-    logger.info('COOKING', `Consumed ${productIds.length} ingredients for recipe`);
-  };
-  */
 
   // Permanently delete product
   const handleDeleteProduct = async (id: string) => {
@@ -991,12 +985,7 @@ function MainScreen() {
             </section>
           )}
 
-          {/* 4. БЛОК РЕЦЕПТОВ («Идея на вечер» временно скрыт по запросу пользователя) */}
-          {/* activeTab === 'inventory' && activeZone === 'all' && selectedCategory === 'Все' && !searchQuery && (
-            <EveningIdeaCard products={products} onCookRecipe={handleCookRecipe} />
-          ) */}
-
-          {/* 5. КАТЕГОРИИ (Спокойный горизонтальный скролл без рядов одинаковых пилюль) */}
+          {/* 4. КАТЕГОРИИ (Спокойный горизонтальный скролл без рядов одинаковых пилюль) */}
           <section className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
             {CATEGORIES.map((cat) => {
               const isSelected = selectedCategory === cat;
@@ -1020,7 +1009,7 @@ function MainScreen() {
             })}
           </section>
 
-          {/* 6. ПОИСК (Минималистичное поле ввода Mindora) */}
+          {/* 5. ПОИСК (Минималистичное поле ввода Mindora) */}
           <div className="relative">
             <Search className="w-4 h-4 absolute left-3.5 top-3 text-[#8FA39D]" />
             <input
@@ -1032,7 +1021,7 @@ function MainScreen() {
             />
           </div>
 
-          {/* 7. СПИСОК ПРОДУКТОВ (Карточки Mindora с главным героем — едой) */}
+          {/* 6. СПИСОК ПРОДУКТОВ (Карточки Mindora с главным героем — едой) */}
           <section className="space-y-2.5 pt-1">
             {displayedProducts.length === 0 ? (
               <div className="py-12 px-6 rounded-2xl backdrop-blur-xl bg-white/[0.04] border border-white/[0.08] shadow-[inset_0_1px_1px_rgba(255,255,255,0.08),0_12px_32px_rgba(0,0,0,0.25)] text-center space-y-2.5">
@@ -1066,7 +1055,7 @@ function MainScreen() {
         </>
       )}
 
-      {/* 9. ФУТЕР (Кликабельная версия с секретным 5-тапом для перехода в диагностику) */}
+      {/* 7. ФУТЕР (Кликабельная версия с секретным 5-тапом для перехода в диагностику) */}
       <footer className="pt-4 pb-2 text-center select-none">
         <button
           type="button"
@@ -1075,10 +1064,10 @@ function MainScreen() {
         >
           <span>
             {syncState === 'connected'
-              ? 'Свежесть v1.2 • Облако подключено 🌿'
+              ? 'Свежесть v1.2.1 • Облако подключено 🌿'
               : syncState === 'syncing'
-              ? 'Свежесть v1.2 • Синхронизация... ⏳'
-              : `Свежесть v1.2 • Офлайн: ${lastSyncError || 'локальные данные'} 📦`}
+              ? 'Свежесть v1.2.1 • Синхронизация... ⏳'
+              : `Свежесть v1.2.1 • Офлайн: ${lastSyncError || 'локальные данные'} 📦`}
           </span>
         </button>
       </footer>
@@ -1107,14 +1096,6 @@ function MainScreen() {
         onOpenChange={setDrawerOpen}
         onAddProduct={handleAddProduct}
       />
-
-      {/* Quick Cook Recipe Drawer (hidden per user request) */}
-      {/* <CookRecipeModal
-        open={cookModalOpen}
-        onOpenChange={setCookModalOpen}
-        recipe={cookingRecipe}
-        onConsumeIngredients={handleConsumeRecipeIngredients}
-      /> */}
 
       {/* Share Family Modal */}
       <ShareModal

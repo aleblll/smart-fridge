@@ -1,5 +1,5 @@
 export type StorageType = 'fridge' | 'freezer' | 'pantry';
-export type UnitType = 'pcs' | 'kg' | 'g' | 'l' | 'pack' | 'шт' | 'уп';
+export type UnitType = 'шт' | 'кг' | 'г' | 'л' | 'мл' | 'уп' | 'pcs' | 'kg' | 'g' | 'l' | 'pack';
 export type ProductStatus = 'active' | 'consumed' | 'discarded';
 
 export interface ProductItem {

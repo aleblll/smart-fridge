@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite';
+import { defineConfig, type PluginOption } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import path from 'path';
@@ -6,14 +6,14 @@ import path from 'path';
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
-    react() as any,
-    tailwindcss() as any
+    react() as unknown as PluginOption,
+    tailwindcss() as unknown as PluginOption,
   ],
   base: '/smart-fridge/',
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src')
-    }
+      '@': path.resolve(__dirname, './src'),
+    },
   },
   build: {
     target: 'es2022',
@@ -34,8 +34,8 @@ export default defineConfig({
           if (id.includes('foodPresets.json')) {
             return 'data-presets';
           }
-        }
-      }
-    }
-  }
+        },
+      },
+    },
+  },
 });

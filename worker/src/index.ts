@@ -244,7 +244,7 @@ CREATE TABLE IF NOT EXISTS shopping_items (
   name TEXT NOT NULL,
   canonical_name TEXT NOT NULL COLLATE NOCASE,
   storage_type TEXT NOT NULL DEFAULT 'fridge',
-  quantity REAL NOT NULL DEFAULT 1,
+  quantity REAL NOT NULL DEFAULT 1 CHECK (quantity > 0),
   unit TEXT NOT NULL DEFAULT 'шт',
   shelf_life_days INTEGER NOT NULL DEFAULT 7,
   is_checked INTEGER NOT NULL DEFAULT 0 CHECK (is_checked IN (0, 1)),
@@ -259,6 +259,10 @@ CREATE INDEX IF NOT EXISTS idx_user_notifications_date ON user_notifications(las
 
 // In-memory rate limiting store: key -> timestamps array
 const rateLimitMap = new Map<string, number[]>();
+
+export function resetRateLimits(): void {
+  rateLimitMap.clear();
+}
 
 export function checkRateLimit(key: string, limit = 60, windowMs = 60000): boolean {
   const now = Date.now();
@@ -615,8 +619,9 @@ class SqliteD1Database implements D1Database {
 export function createInMemoryD1(): D1Database {
   let sqliteDb: any = null;
   try {
-    const mod = typeof process !== 'undefined' && typeof (process as any).getBuiltinModule === 'function'
-      ? (process as any).getBuiltinModule('node:sqlite')
+    const proc = (globalThis as any).process;
+    const mod = proc && typeof proc.getBuiltinModule === 'function'
+      ? proc.getBuiltinModule('node:sqlite')
       : null;
     if (mod && mod.DatabaseSync) {
       sqliteDb = new mod.DatabaseSync(':memory:');
@@ -693,24 +698,22 @@ export async function ensureD1Schema(db: D1Database): Promise<void> {
   }
 }
 
-// In-memory legacy fallback store (for backwards compatibility if needed)
-export const memoryStore = new Map<string, any>();
-
 // CORS Whitelist
 const ALLOWED_ORIGINS = new Set([
   'https://aleblll.github.io',
-  'http://localhost:5173',
-  'http://localhost:4173',
-  'http://localhost:3000',
   'https://web.telegram.org',
   'https://webk.telegram.org',
-  'https://webz.telegram.org'
+  'https://webz.telegram.org',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'http://localhost:4173',
+  'http://localhost:3000'
 ]);
 
 export function getCorsHeaders(request?: Request): Record<string, string> {
   const origin = request?.headers?.get('Origin') || '';
   let allowedOrigin = 'https://aleblll.github.io';
-  if (origin && (ALLOWED_ORIGINS.has(origin) || origin.startsWith('https://aleblll.github.io') || origin.startsWith('android-app://') || origin.includes('telegram'))) {
+  if (ALLOWED_ORIGINS.has(origin)) {
     allowedOrigin = origin;
   } else if (!origin || origin === 'null') {
     allowedOrigin = '*';
@@ -777,6 +780,19 @@ export function formatMoreProducts(count: number): string {
   return `и еще ${count} продуктов`;
 }
 
+export function formatUnitRu(unit: string): string {
+  if (!unit) return '';
+  switch (unit.toLowerCase()) {
+    case 'pcs': return 'шт';
+    case 'kg': return 'кг';
+    case 'g': return 'г';
+    case 'l': return 'л';
+    case 'ml': return 'мл';
+    case 'pack': return 'уп';
+    default: return unit;
+  }
+}
+
 export function formatDigestHtml(
   userDigest: UserDigest,
   appUrl = 'https://aleblll.github.io/smart-fridge/'
@@ -798,7 +814,7 @@ export function formatDigestHtml(
     for (const item of expiredOrToday) {
       const isExpired = item.daysDiff < 0;
       const statusSuffix = isExpired ? ` (просрочено на ${Math.abs(item.daysDiff)} дн.)` : ' (сегодня)';
-      lines.push(`• <b>${escapeHtml(item.name)}</b> — ${item.quantity} ${escapeHtml(item.unit)}${statusSuffix}`);
+      lines.push(`• <b>${escapeHtml(item.name)}</b> — ${item.quantity} ${escapeHtml(formatUnitRu(item.unit))}${statusSuffix}`);
     }
     lines.push('');
   }
@@ -806,7 +822,7 @@ export function formatDigestHtml(
   if (tomorrow.length > 0) {
     lines.push('🟡 <b>Истекает завтра:</b>');
     for (const item of tomorrow) {
-      lines.push(`• <b>${escapeHtml(item.name)}</b> — ${item.quantity} ${escapeHtml(item.unit)}`);
+      lines.push(`• <b>${escapeHtml(item.name)}</b> — ${item.quantity} ${escapeHtml(formatUnitRu(item.unit))}`);
     }
     lines.push('');
   }
@@ -814,7 +830,7 @@ export function formatDigestHtml(
   if (soon.length > 0) {
     lines.push('🟠 <b>Истекает в ближайшие дни:</b>');
     for (const item of soon) {
-      lines.push(`• ${escapeHtml(item.name)} (${item.quantity} ${escapeHtml(item.unit)}) — до ${item.expires_at}`);
+      lines.push(`• ${escapeHtml(item.name)} (${item.quantity} ${escapeHtml(formatUnitRu(item.unit))}) — до ${item.expires_at}`);
     }
     lines.push('');
   }
@@ -977,6 +993,15 @@ export async function runDailyDigestNotifications(
       )
     `).run();
   } catch {}
+
+  // Auto-cleanup stale archive & deleted records to protect D1 storage/reads
+  try {
+    await db.prepare(
+      "DELETE FROM products WHERE deleted_at IS NOT NULL OR (status IN ('consumed', 'discarded') AND updated_at < datetime('now', '-30 days'))"
+    ).run();
+  } catch (cleanErr) {
+    console.warn('[Worker Cron] Archive cleanup warning:', cleanErr);
+  }
 
   // D1 query: select active products expiring on or before now + notify_before_days
   // Joined with fridges and fridge_members to get recipient user_id and last_digest_date
@@ -1185,48 +1210,10 @@ export default {
     // Health Check & Automatic Webhook Setup
     // ==========================================
     if (normalizedPath === '/api/health' || normalizedPath === '/health') {
-      let botUsername: string | null = null;
-      let botId: number | null = null;
-      let webhookInfo: any = null;
-      let webhookStatus: string = 'unknown';
-
-      if (botToken) {
-        try {
-          const meRes = await fetch(`https://api.telegram.org/bot${botToken}/getMe`);
-          const meData = await meRes.json() as any;
-          if (meData?.ok) {
-            botUsername = meData.result?.username || null;
-            botId = meData.result?.id || null;
-          }
-
-          const targetWebhookUrl = `https://${url.host}/api/telegram-webhook`;
-          const whRes = await fetch(`https://api.telegram.org/bot${botToken}/getWebhookInfo`);
-          webhookInfo = await whRes.json() as any;
-
-          if (webhookInfo?.result?.url !== targetWebhookUrl) {
-            const secretParam = env.TELEGRAM_WEBHOOK_SECRET ? `&secret_token=${encodeURIComponent(env.TELEGRAM_WEBHOOK_SECRET)}` : '';
-            const setRes = await fetch(`https://api.telegram.org/bot${botToken}/setWebhook?url=${encodeURIComponent(targetWebhookUrl)}${secretParam}`);
-            const setData = await setRes.json() as any;
-            webhookStatus = setData?.ok ? 'auto_configured' : 'failed_to_set';
-          } else {
-            webhookStatus = 'verified';
-          }
-        } catch (e: any) {
-          webhookStatus = `error: ${e.message}`;
-        }
-      }
-
       return jsonResponse({
-        status: 'ok',
-        version: '1.2.0',
-        subdomain: url.host,
-        hasBotToken: Boolean(botToken),
-        botUsername,
-        botId,
-        hasDb: Boolean(db),
-        webhookStatus,
-        webhookUrl: webhookInfo?.result?.url || null,
-        time: new Date().toISOString()
+        ok: true,
+        status: 'healthy',
+        version: '1.2.1'
       }, 200, corsHeaders);
     }
 
@@ -1347,17 +1334,19 @@ export default {
                 if (!isExpired && !isLimitReached) {
                   targetFridgeId = invite.fridge_id;
 
-                  // Add user to fridge_members
+                  // Add user to fridge_members atomically
                   const now = new Date().toISOString();
-                  await db.prepare('INSERT OR IGNORE INTO fridge_members (fridge_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)').bind(
+                  const insertRes = await db.prepare('INSERT OR IGNORE INTO fridge_members (fridge_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)').bind(
                     invite.fridge_id,
                     fromUser.id,
                     'member',
                     now
                   ).run();
 
-                  // Increment uses_count
-                  await db.prepare('UPDATE invites SET uses_count = uses_count + 1 WHERE code = ?').bind(inviteCode).run();
+                  // Increment uses_count ONLY if newly joined
+                  if ((insertRes.meta?.changes ?? 0) > 0) {
+                    await db.prepare('UPDATE invites SET uses_count = uses_count + 1 WHERE code = ? AND uses_count < max_uses AND expires_at > ?').bind(inviteCode, now).run();
+                  }
 
                   // Fetch fridge name
                   const fRes = await db.prepare('SELECT name FROM fridges WHERE id = ?').bind(invite.fridge_id).first<any>();
@@ -1400,12 +1389,12 @@ export default {
 
           if (token) {
             let welcomeText = '';
-            let appUrl = 'https://aleblll.github.io/smart-fridge/?v=1.2.0';
+            let appUrl = 'https://aleblll.github.io/smart-fridge/?v=1.2.1';
             let buttonText = '🌿 Открыть Холодильник';
 
             if (joinedFridgeName && targetFridgeId) {
-              welcomeText = `🎉 <b>Вас успешно подключили к холодильнику «${joinedFridgeName}»!</b>\n\nТеперь вы и ваша семья можете вместе вести учет продуктов, следить за сроками годности и общим списком покупок 🌿\n\nНажмите кнопку ниже, чтобы открыть общий холодильник:`;
-              appUrl = `https://aleblll.github.io/smart-fridge/?v=1.2.0&fridge_id=${encodeURIComponent(targetFridgeId)}#tgWebAppStartParam=fridge_${inviteCode}`;
+              welcomeText = `🎉 <b>Вас успешно подключили к холодильнику «${escapeHtml(joinedFridgeName)}»!</b>\n\nТеперь вы и ваша семья можете вместе вести учет продуктов, следить за сроками годности и общим списком покупок 🌿\n\nНажмите кнопку ниже, чтобы открыть общий холодильник:`;
+              appUrl = `https://aleblll.github.io/smart-fridge/?v=1.2.1&fridge_id=${encodeURIComponent(targetFridgeId)}#tgWebAppStartParam=fridge_${inviteCode}`;
               buttonText = `🌿 Открыть «${joinedFridgeName}»`;
             } else if (inviteCode) {
               welcomeText = `⚠️ <b>Приглашение недействительно</b> или срок его действия истек.\n\nВы можете открыть свой личный холодильник кнопкой ниже:`;
@@ -1463,7 +1452,7 @@ export default {
         return jsonResponse({ error: 'Bot token not configured on server', code: 'SERVER_MISCONFIG' }, 500, corsHeaders);
       }
 
-      const maxAuthAge = env.ENVIRONMENT === 'test' ? 3600 : 86400 * 30;
+      const maxAuthAge = env.ENVIRONMENT === 'test' ? 3600 : 86400;
       const authResult = await verifyTelegramAuth(initDataRaw, botToken, maxAuthAge);
       if (authResult.error === 'AUTH_EXPIRED') {
         return jsonResponse({ error: 'Auth date expired', code: 'AUTH_EXPIRED' }, 401, corsHeaders);
@@ -1497,7 +1486,7 @@ export default {
       return jsonResponse({ error: 'Bot token not configured on server', code: 'SERVER_MISCONFIG' }, 500, corsHeaders);
     }
 
-    const maxAuthAge = env.ENVIRONMENT === 'test' ? 3600 : 86400 * 30;
+    const maxAuthAge = env.ENVIRONMENT === 'test' ? 3600 : 86400;
     const authResult = await verifyTelegramAuth(initDataHeader, botToken, maxAuthAge);
     if (authResult.error === 'AUTH_EXPIRED') {
       console.warn('[Worker Auth] 401 AUTH_EXPIRED for user request');
@@ -1551,7 +1540,7 @@ export default {
         }
       }
 
-      const appUrl = 'https://aleblll.github.io/smart-fridge/?v=1.2.0';
+      const appUrl = 'https://aleblll.github.io/smart-fridge/?v=1.2.1';
       let messageHtml = '';
 
       if (items.length > 0) {
@@ -1757,9 +1746,22 @@ export default {
         const ownerId = ownerMember ? ownerMember.user_id : 0;
         const memberIds = members.map((m: any) => m.user_id);
 
-        const productsRes = await db.prepare(
-          'SELECT id, fridge_id, name, canonical_name, category, barcode, storage_type, quantity, unit, is_discrete, opened_at, expires_at, after_opening_hours, notify_before_days, status, added_by, created_at, updated_at FROM products WHERE fridge_id = ? AND deleted_at IS NULL ORDER BY expires_at ASC'
-        ).bind(fridgeId).all<any>();
+        const productsRes = await db.prepare(`
+          SELECT * FROM (
+            SELECT id, fridge_id, name, canonical_name, category, barcode, storage_type, quantity, unit, is_discrete, opened_at, expires_at, after_opening_hours, notify_before_days, status, added_by, created_at, updated_at
+            FROM products
+            WHERE fridge_id = ? AND status = 'active' AND deleted_at IS NULL
+            UNION ALL
+            SELECT id, fridge_id, name, canonical_name, category, barcode, storage_type, quantity, unit, is_discrete, opened_at, expires_at, after_opening_hours, notify_before_days, status, added_by, created_at, updated_at
+            FROM (
+              SELECT id, fridge_id, name, canonical_name, category, barcode, storage_type, quantity, unit, is_discrete, opened_at, expires_at, after_opening_hours, notify_before_days, status, added_by, created_at, updated_at
+              FROM products
+              WHERE fridge_id = ? AND status IN ('consumed', 'discarded') AND deleted_at IS NULL
+              ORDER BY updated_at DESC
+              LIMIT 50
+            )
+          ) ORDER BY expires_at ASC
+        `).bind(fridgeId, fridgeId).all<any>();
         const products = productsRes.results || [];
 
         return jsonResponse({
@@ -1811,6 +1813,12 @@ export default {
             if (!name) {
               return jsonResponse({ error: 'Missing name', code: 'INVALID_PAYLOAD' }, 400, corsHeaders);
             }
+            if (payload?.quantity !== undefined) {
+              const q = Number(payload.quantity);
+              if (!Number.isFinite(q) || q <= 0) {
+                return jsonResponse({ error: 'Quantity must be a positive finite number', code: 'INVALID_PAYLOAD' }, 400, corsHeaders);
+              }
+            }
             const id = typeof payload.id === 'string' && payload.id ? payload.id : `shop-${Date.now()}-${crypto.randomUUID().slice(0, 6)}`;
             const canonical = (payload.canonical_name || name).toLowerCase().trim();
             const storageType = ['fridge', 'freezer', 'pantry'].includes(payload.storage_type) ? payload.storage_type : 'fridge';
@@ -1836,6 +1844,39 @@ export default {
 
         // POST /api/fridges/:id/shopping/transfer
         if (request.method === 'POST' && subId === 'transfer') {
+          let body: any = null;
+          try {
+            body = await request.json();
+          } catch {}
+
+          const clientProductIdMap = new Map<string, string>();
+          if (body) {
+            const itemsArr = Array.isArray(body) ? body : (Array.isArray(body.items) ? body.items : null);
+            if (itemsArr) {
+              for (const it of itemsArr) {
+                if (it && typeof it === 'object') {
+                  const shopId = it.id || it.shopping_item_id || it.itemId;
+                  const prodId = it.product_id || it.target_product_id || it.productId || it.targetProductId;
+                  if (shopId && prodId) {
+                    clientProductIdMap.set(String(shopId), String(prodId));
+                  }
+                }
+              }
+            } else if (typeof body === 'object') {
+              for (const [key, val] of Object.entries(body)) {
+                if (key === 'items') continue;
+                if (typeof val === 'string') {
+                  clientProductIdMap.set(key, val);
+                } else if (val && typeof val === 'object') {
+                  const prodId = (val as any).product_id || (val as any).target_product_id || (val as any).productId || (val as any).targetProductId;
+                  if (prodId) {
+                    clientProductIdMap.set(key, String(prodId));
+                  }
+                }
+              }
+            }
+          }
+
           const checkedRes = await db.prepare('SELECT * FROM shopping_items WHERE fridge_id = ? AND is_checked = 1').bind(fridgeId).all<any>();
           const checkedItems = checkedRes.results || [];
           if (checkedItems.length === 0) {
@@ -1847,7 +1888,8 @@ export default {
           const transferredProducts: ProductItem[] = [];
 
           for (const item of checkedItems) {
-            const prodId = `prod-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
+            const clientProdId = clientProductIdMap.get(item.id);
+            const prodId = clientProdId || `prod-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
             const expDate = new Date(now.getTime() + (item.shelf_life_days || 7) * 86400000);
             const expiresAt = expDate.toISOString().slice(0, 10);
             const storageType = item.storage_type || 'fridge';
@@ -1889,17 +1931,20 @@ export default {
               name: item.name,
               canonical_name: canonical,
               category: 'Другое',
+              barcode: null,
               storage_type: storageType,
               quantity: qty,
               unit: unit,
               is_discrete: 1,
               opened_at: null,
               expires_at: expiresAt,
+              after_opening_hours: null,
               notify_before_days: 2,
               status: 'active',
               added_by: authUserId,
               created_at: nowIso,
-              updated_at: nowIso
+              updated_at: nowIso,
+              deleted_at: null
             });
           }
 
@@ -1914,6 +1959,12 @@ export default {
           const existing = await db.prepare('SELECT * FROM shopping_items WHERE id = ? AND fridge_id = ?').bind(subId, fridgeId).first<any>();
           if (!existing) {
             return jsonResponse({ error: 'Item not found', code: 'ITEM_NOT_FOUND' }, 404, corsHeaders);
+          }
+          if (payload?.quantity !== undefined) {
+            const q = Number(payload.quantity);
+            if (!Number.isFinite(q) || q <= 0) {
+              return jsonResponse({ error: 'Quantity must be a positive finite number', code: 'INVALID_PAYLOAD' }, 400, corsHeaders);
+            }
           }
           const isChecked = payload.is_checked !== undefined ? (payload.is_checked ? 1 : 0) : existing.is_checked;
           const name = payload.name !== undefined ? String(payload.name).trim() : existing.name;
@@ -1950,17 +2001,43 @@ export default {
         // Route: GET /api/fridges/:id/products
         if (request.method === 'GET' && !productId) {
           try {
-            const productsRes = await db.prepare(
-              'SELECT id, fridge_id, name, canonical_name, category, barcode, storage_type, quantity, unit, is_discrete, opened_at, expires_at, after_opening_hours, notify_before_days, status, added_by, created_at, updated_at FROM products WHERE fridge_id = ? AND deleted_at IS NULL ORDER BY expires_at ASC'
-            ).bind(fridgeId).all<any>();
+            const productsRes = await db.prepare(`
+              SELECT * FROM (
+                SELECT id, fridge_id, name, canonical_name, category, barcode, storage_type, quantity, unit, is_discrete, opened_at, expires_at, after_opening_hours, notify_before_days, status, added_by, created_at, updated_at
+                FROM products
+                WHERE fridge_id = ? AND status = 'active' AND deleted_at IS NULL
+                UNION ALL
+                SELECT id, fridge_id, name, canonical_name, category, barcode, storage_type, quantity, unit, is_discrete, opened_at, expires_at, after_opening_hours, notify_before_days, status, added_by, created_at, updated_at
+                FROM (
+                  SELECT id, fridge_id, name, canonical_name, category, barcode, storage_type, quantity, unit, is_discrete, opened_at, expires_at, after_opening_hours, notify_before_days, status, added_by, created_at, updated_at
+                  FROM products
+                  WHERE fridge_id = ? AND status IN ('consumed', 'discarded') AND deleted_at IS NULL
+                  ORDER BY updated_at DESC
+                  LIMIT 50
+                )
+              ) ORDER BY expires_at ASC
+            `).bind(fridgeId, fridgeId).all<any>();
             const products = productsRes.results || [];
             return jsonResponse({ success: true, products }, 200, corsHeaders);
           } catch (e: any) {
             console.error('[Worker Products] GET products error, falling back:', e);
             try {
-              const fallbackRes = await db.prepare(
-                'SELECT id, fridge_id, name, category, storage_type, quantity, unit, opened_at, expires_at, notify_before_days, status, added_by, created_at, updated_at FROM products WHERE fridge_id = ? AND deleted_at IS NULL ORDER BY expires_at ASC'
-              ).bind(fridgeId).all<any>();
+              const fallbackRes = await db.prepare(`
+                SELECT * FROM (
+                  SELECT id, fridge_id, name, category, storage_type, quantity, unit, opened_at, expires_at, notify_before_days, status, added_by, created_at, updated_at
+                  FROM products
+                  WHERE fridge_id = ? AND status = 'active' AND deleted_at IS NULL
+                  UNION ALL
+                  SELECT id, fridge_id, name, category, storage_type, quantity, unit, opened_at, expires_at, notify_before_days, status, added_by, created_at, updated_at
+                  FROM (
+                    SELECT id, fridge_id, name, category, storage_type, quantity, unit, opened_at, expires_at, notify_before_days, status, added_by, created_at, updated_at
+                    FROM products
+                    WHERE fridge_id = ? AND status IN ('consumed', 'discarded') AND deleted_at IS NULL
+                    ORDER BY updated_at DESC
+                    LIMIT 50
+                  )
+                ) ORDER BY expires_at ASC
+              `).bind(fridgeId, fridgeId).all<any>();
               const products = (fallbackRes.results || []).map((p: any) => ({
                 ...p,
                 canonical_name: p.name ? p.name.toLowerCase() : '',
@@ -2267,36 +2344,15 @@ export default {
             const payload = body?.item || body;
 
             let name = existingProduct.name;
-            if (payload.name !== undefined) {
+            if (payload?.name !== undefined) {
               name = String(payload.name).trim();
               if (!name || name.length > 128) {
                 return jsonResponse({ error: 'Invalid product name', code: 'INVALID_PAYLOAD' }, 400, corsHeaders);
               }
             }
 
-            let quantity = existingProduct.quantity;
-            let status = existingProduct.status;
-
-            // Partial decrement for consumption ("Сколько съели?")
-            if (payload.delta_consumed !== undefined && typeof payload.delta_consumed === 'number' && payload.delta_consumed > 0) {
-              quantity = Math.round(Math.max(0, existingProduct.quantity - payload.delta_consumed) * 1000) / 1000;
-              if (quantity <= 0) {
-                status = 'consumed';
-                quantity = 0;
-              }
-            } else if (payload.quantity !== undefined) {
-              quantity = Number(payload.quantity);
-              if (!Number.isFinite(quantity) || quantity < 0 || quantity > 10000) {
-                return jsonResponse({ error: 'Invalid quantity', code: 'INVALID_PAYLOAD' }, 400, corsHeaders);
-              }
-            }
-
-            if (payload.status !== undefined && ['active', 'consumed', 'discarded'].includes(payload.status)) {
-              status = payload.status;
-            }
-
             let expiresAt = existingProduct.expires_at;
-            if (payload.expires_at !== undefined) {
+            if (payload?.expires_at !== undefined) {
               const dateRegex = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
               if (typeof payload.expires_at !== 'string' || !dateRegex.test(payload.expires_at)) {
                 return jsonResponse({ error: 'Invalid expires_at format: must be YYYY-MM-DD', code: 'INVALID_PAYLOAD' }, 400, corsHeaders);
@@ -2317,19 +2373,19 @@ export default {
               expiresAt = payload.expires_at;
             }
 
-            const category = payload.category !== undefined ? String(payload.category).slice(0, 64) : existingProduct.category;
-            const storageType = payload.storage_type !== undefined && ['fridge', 'freezer', 'pantry'].includes(payload.storage_type)
+            const category = payload?.category !== undefined ? String(payload.category).slice(0, 64) : existingProduct.category;
+            const storageType = payload?.storage_type !== undefined && ['fridge', 'freezer', 'pantry'].includes(payload.storage_type)
               ? payload.storage_type
               : existingProduct.storage_type;
-            const unit = payload.unit !== undefined && ['pcs', 'kg', 'g', 'l', 'pack', 'шт', 'уп', 'мл', 'г', 'кг', 'л'].includes(payload.unit)
+            const unit = payload?.unit !== undefined && ['pcs', 'kg', 'g', 'l', 'pack', 'шт', 'уп', 'мл', 'г', 'кг', 'л'].includes(payload.unit)
               ? payload.unit
               : existingProduct.unit;
-            const notifyBeforeDays = payload.notify_before_days !== undefined && typeof payload.notify_before_days === 'number' && payload.notify_before_days >= 0 && payload.notify_before_days <= 14
+            const notifyBeforeDays = payload?.notify_before_days !== undefined && typeof payload.notify_before_days === 'number' && payload.notify_before_days >= 0 && payload.notify_before_days <= 14
               ? payload.notify_before_days
               : existingProduct.notify_before_days;
 
             let openedAt = existingProduct.opened_at;
-            if (payload.opened_at !== undefined) {
+            if (payload?.opened_at !== undefined) {
               openedAt = payload.opened_at ? String(payload.opened_at).slice(0, 30) : null;
               if (openedAt && !existingProduct.opened_at && existingProduct.after_opening_hours) {
                 const openingLimitDate = new Date(Date.now() + existingProduct.after_opening_hours * 3600000).toISOString().slice(0, 10);
@@ -2341,33 +2397,63 @@ export default {
 
             const now = new Date().toISOString();
 
-            await db.prepare(`
-              UPDATE products SET
-                name = ?, category = ?, storage_type = ?, quantity = ?, unit = ?,
-                opened_at = ?, expires_at = ?, notify_before_days = ?, status = ?,
-                updated_at = ?
-              WHERE id = ? AND fridge_id = ?
-            `).bind(
-              name, category, storageType, quantity, unit,
-              openedAt, expiresAt, notifyBeforeDays, status,
-              now, productId, fridgeId
-            ).run();
+            if (payload?.delta_consumed !== undefined && typeof payload.delta_consumed === 'number' && payload.delta_consumed > 0) {
+              // Atomic consumption decrement in SQL:
+              // quantity = ROUND(MAX(0, quantity - ?), 3),
+              // status = CASE WHEN ROUND(quantity - ?, 3) <= 0 THEN 'consumed' ELSE status END
+              const delta = payload.delta_consumed;
+              await db.prepare(`
+                UPDATE products SET
+                  name = ?, category = ?, storage_type = ?,
+                  quantity = ROUND(MAX(0, quantity - ?), 3),
+                  unit = ?, opened_at = ?, expires_at = ?, notify_before_days = ?,
+                  status = CASE WHEN ROUND(quantity - ?, 3) <= 0 THEN 'consumed' ELSE status END,
+                  updated_at = ?
+                WHERE id = ? AND fridge_id = ?
+              `).bind(
+                name, category, storageType,
+                delta,
+                unit, openedAt, expiresAt, notifyBeforeDays,
+                delta,
+                now, productId, fridgeId
+              ).run();
+            } else {
+              let quantity = existingProduct.quantity;
+              let status = existingProduct.status;
 
-            const updatedProduct: ProductItem = {
-              ...existingProduct,
-              name,
-              category,
-              storage_type: storageType,
-              quantity,
-              unit,
-              opened_at: openedAt,
-              expires_at: expiresAt,
-              notify_before_days: notifyBeforeDays,
-              status,
-              updated_at: now
-            };
+              if (payload?.status !== undefined && ['active', 'consumed', 'discarded'].includes(payload.status)) {
+                status = payload.status;
+              }
 
-            return jsonResponse({ success: true, product: updatedProduct }, 200, corsHeaders);
+              if (payload?.quantity !== undefined) {
+                quantity = Number(payload.quantity);
+                if (!Number.isFinite(quantity) || quantity < 0 || quantity > 10000) {
+                  return jsonResponse({ error: 'Invalid quantity', code: 'INVALID_PAYLOAD' }, 400, corsHeaders);
+                }
+              } else if (status === 'consumed') {
+                // If status = 'consumed' directly (full consumption) without delta_consumed and without explicit quantity:
+                // set quantity = 0!
+                quantity = 0;
+              }
+
+              await db.prepare(`
+                UPDATE products SET
+                  name = ?, category = ?, storage_type = ?, quantity = ?, unit = ?,
+                  opened_at = ?, expires_at = ?, notify_before_days = ?, status = ?,
+                  updated_at = ?
+                WHERE id = ? AND fridge_id = ?
+              `).bind(
+                name, category, storageType, quantity, unit,
+                openedAt, expiresAt, notifyBeforeDays, status,
+                now, productId, fridgeId
+              ).run();
+            }
+
+            const updatedRow = await db.prepare(
+              'SELECT id, fridge_id, name, canonical_name, category, barcode, storage_type, quantity, unit, is_discrete, opened_at, expires_at, after_opening_hours, notify_before_days, status, added_by, created_at, updated_at FROM products WHERE id = ? AND fridge_id = ?'
+            ).bind(productId, fridgeId).first<any>();
+
+            return jsonResponse({ success: true, product: updatedRow }, 200, corsHeaders);
           } catch (e: any) {
             return jsonResponse({ error: e.message || 'Bad Request', code: 'BAD_REQUEST' }, 400, corsHeaders);
           }
