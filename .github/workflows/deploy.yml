@@ -21,7 +21,10 @@ jobs:
           node-version: 22
 
       - name: Install dependencies
-        run: npm install
+        run: |
+          # Workaround for npm bug #4828 (Windows lockfile missing @tailwindcss/oxide Linux native binding in CI)
+          rm -f package-lock.json frontend/package-lock.json worker/package-lock.json
+          npm install --include=optional
 
       - name: Build frontend
         run: npm run build --workspace=frontend
